@@ -26,7 +26,7 @@ public sealed class GestureTests
         public readonly List<GestureEffect> Effects = [];
         public readonly GestureEngine Engine;
         private int consumed;
-        public H(AppSettings? settings = null) => Engine = new(Clock, this, settings ?? new());
+        public H(AppSettings? settings = null) => Engine = new(Clock, this, GestureTestSettings.AllOn(settings));
         public void Post(GestureEffect effect) => Effects.Add(effect);
         public bool Event(MouseEventKind kind, int x = 0, int y = 0, PointerButton button = PointerButton.Right, PointerModifiers mods = 0, int delta = 0)
             => Engine.Handle(new(kind, new(x, y), button, delta, mods));
@@ -289,7 +289,7 @@ public sealed class GestureTests
     [Fact] public void SettingsReloadInvalidatesPendingResultAndUsesNewBindings()
     {
         var h = new H(); long id = h.Down(PointerButton.Middle);
-        h.Engine.UpdateSettings(new() { Gesture = new() { Gestures = new() { ["L"] = "Refresh" } } });
+        h.Engine.UpdateSettings(GestureTestSettings.AllOn(new() { Gesture = new() { Gestures = new() { ["L"] = "Refresh" } } }));
         h.Hits.Result = new(42, false, "CloseWindow"); h.Decide(id); Assert.Empty(h.Commands);
         h.SendQueued(); h.Event(MouseEventKind.Up, button: PointerButton.Middle);
         h.Hits.Result = new(42, true); h.Start(); h.Event(MouseEventKind.Move, -12); h.Event(MouseEventKind.Up);

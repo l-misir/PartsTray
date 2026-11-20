@@ -148,7 +148,7 @@ public sealed class PointerWindowTests
             Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
             for (int i = 0; i < 100; i++) Assert.False(worker.TryPost(() => throw new InvalidOperationException("must be dropped")));
             // No native APIs: an unrelated fake hit test can complete while focus remains blocked.
-            var effects = new Effects(); var engine = new GestureEngine(new FakeClock(), effects, new());
+            var effects = new Effects(); var engine = new GestureEngine(new FakeClock(), effects, GestureTestSettings.AllOn());
             Assert.True(engine.Handle(new(MouseEventKind.Down, default, PointerButton.Middle)));
             long token = effects.Items.Single(e => e.Kind == GestureEffectKind.HitTest).Token;
             engine.Resolve(token, new(42, false, "CloseWindow"));

@@ -14,7 +14,7 @@ public sealed record AppSettings
     public DiagnosticsSettings Diagnostics { get; init; } = new();
     public MonitorSettings Monitor { get; init; } = new();
     public BatterySettings Battery { get; init; } = new();
-    public bool MoveDisabledWindows { get; init; } = true;
+    public bool MoveDisabledWindows { get; init; } = false;   // 11/20：配った人向けに最初は切る（GestureSettings.cs と同じ理由）
     [JsonExtensionData] public Dictionary<string, JsonElement>? Modules { get; init; }
     public static readonly JsonSerializerOptions JsonOptions = new()
     { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true };

@@ -3,6 +3,23 @@ using PartsTray.Core;
 namespace PartsTray.Tests;
 
 internal sealed class FakeClock : IClock { public TimeSpan Now { get; set; } }
+
+// 11/20 に、かざぐるマウス由来の操作（ジェスチャー・タイトルバー・ホイール・無効なウィンドウの移動）の既定を「切る」に変えた。
+// ジェスチャーのテストは、変える前の既定（全部オン）を前提に書いてあるので、これでそろえる。
+internal static class GestureTestSettings
+{
+    public static AppSettings AllOn(AppSettings? settings = null)
+    {
+        var s = settings ?? new();
+        return s with
+        {
+            Gesture = s.Gesture with { Enabled = true },
+            TitleBar = new() { ShiftClick = "ToggleTopMost", CtrlClick = "OpenExecutableFolder", MiddleClick = "CloseWindow", MinimizeButtonRightClick = "MinimizeToTray" },
+            Wheel = s.Wheel with { FastScrollOnScrollBar = true, FocusUnderCursor = true },
+            MoveDisabledWindows = true
+        };
+    }
+}
 internal sealed class FakeInput : IInputSink
 {
     public List<string> KeyEvents { get; } = [];

@@ -33,6 +33,23 @@ public sealed class DistributionSettingsTests
         Assert.Equal(5, s.GapFiller.Buttons.Count); Assert.Equal("hook", s.GapFiller.ThumbWheel.Mode);
     }
 
+    // 11/20：配った人の PC で知らないうちにウィンドウの動きが変わらないよう、かざぐるマウス由来の操作は最初は切る。
+    // 設定ファイルに値が書いてあれば、その値を使う（作者の PC の動きは変わらない）。
+    [Fact]
+    public void WindowFeaturesAreOffByDefaultButExplicitValuesWin()
+    {
+        var d = JsonSerializer.Deserialize<AppSettings>("{}", AppSettings.JsonOptions)!;
+        d.Validate();
+        Assert.False(d.Gesture.Enabled); Assert.False(d.MoveDisabledWindows);
+        Assert.Equal("None", d.TitleBar.ShiftClick); Assert.Equal("None", d.TitleBar.CtrlClick);
+        Assert.Equal("None", d.TitleBar.MiddleClick); Assert.Equal("None", d.TitleBar.MinimizeButtonRightClick);
+        Assert.False(d.Wheel.FastScrollOnScrollBar); Assert.False(d.Wheel.FocusUnderCursor);
+        var e = JsonSerializer.Deserialize<AppSettings>("{\"gesture\":{\"enabled\":true},\"titleBar\":{\"middleClick\":\"CloseWindow\"},\"wheel\":{\"focusUnderCursor\":true},\"moveDisabledWindows\":true}", AppSettings.JsonOptions)!;
+        e.Validate();
+        Assert.True(e.Gesture.Enabled); Assert.Equal("CloseWindow", e.TitleBar.MiddleClick);
+        Assert.True(e.Wheel.FocusUnderCursor); Assert.True(e.MoveDisabledWindows);
+    }
+
     // 11/20：残量 100% の虹の輪。既定は有効・1 周 1100ms。1 周の時間は 200〜10000ms だけ受け付ける。
     [Theory]
     [InlineData("{}", true, 1100)]

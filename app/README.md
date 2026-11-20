@@ -8,6 +8,13 @@ MX Master 4 を Logi Bolt 経由で使用し、再接続から Options+ の設�
 
 この実装作業では **アプリを一度も起動せず、マウスフックの導入、オーバーレイ表示、HID・SendInput・レジストリ操作も実行していません**。検証はビルドと偽送受信・偽時計・偽ヒットテストの xUnit テストのみです。実機確認はコードレビュー後に行ってください。
 
+## 配る前の最終確認での直し（2026-11-20、Claude）
+
+- かざぐるマウス由来の操作を、既定では切るようにした：`gesture.enabled`、`titleBar` の 4 つ（`None`）、`wheel.fastScrollOnScrollBar`・`wheel.focusUnderCursor`、`moveDisabledWindows`。受け取った人の PC で、タイトルバーの中クリックでウィンドウが閉じるなど、知らないうちに動きが変わるのを防ぐため。設定ファイルに値が書いてあればその値を使うので、作者の PC の動きは変わらない。ジェスチャーのテストは、変える前の既定（全部オン）を `GestureTestSettings.AllOn` でそろえている
+- 初めての起動（`config.json` がまだない）では、2 秒後に「アイコンは ∧ の中にあります」という通知を出す（`Program.cs` の `ShowFirstRunGuide`）。Windows は新しいアプリの通知アイコンを最初は隠すので、何も起きないように見えるため
+- .NET 9 デスクトップ ランタイムがない PC では、.NET の起動部分が英語のダイアログ（「You must install or update .NET to run this application.」、「Download it now」「閉じる」）を出すことを確かめた（試し用のコピーで、存在しない版の .NET を求めるように書き換えて起動）。アプリ自身は .NET がないと動けないので、日本語の案内は出せない。トップの README に入れ方を書いた
+- 設定ファイルなしの初めての起動を、配る zip と同じ中身で試した：設定ファイルが既定値で作られ、肩代わりは切れた状態で始まり、電池・CPU・温度・メモリのアイコンが出た。エラーはなし
+
 ## 改名とアプリのアイコン（2026-11-20、Claude）
 
 - フォルダー・プロジェクト・名前空間・exe を `PartsTray` にした（`PartsTray.sln`、`PartsTray/`、`PartsTray.Core/`、`PartsTray.Tests/`、`PartsTray.exe`）

@@ -87,6 +87,7 @@ internal sealed class TrayContext : ApplicationContext
         this.log = log;
         _ = dispatcher.Handle;
         AppSettings settings;
+        bool firstRun = !File.Exists(configPath);   // 設定ファイルがまだない＝初めての起動（Load が既定値で作る）
         try { settings = AppSettings.Load(configPath); }
         catch (Exception ex) { log.Write($"設定エラー、安全のため一時停止: {ex}"); settings = new() { GapFiller = new() { Enabled = false }, Gesture = new() { Enabled = false }, TitleBar = new() { ShiftClick = "None", CtrlClick = "None", MiddleClick = "None", MinimizeButtonRightClick = "None" }, Wheel = new() { FastScrollOnScrollBar = false, FocusUnderCursor = false }, MoveDisabledWindows = false }; }
         configStamp = File.Exists(configPath) ? File.GetLastWriteTimeUtc(configPath) : default;
@@ -135,6 +136,23 @@ internal sealed class TrayContext : ApplicationContext
         SystemEvents.PowerModeChanged += PowerChanged;
         showWait = ThreadPool.RegisterWaitForSingleObject(show, (_, _) => Post(OpenSettings), null, Timeout.Infinite, false);
         settingsTimer.Tick += (_, _) => Reload(); settingsTimer.Start();
+        if (firstRun) ShowFirstRunGuide();
+    }
+    // 初めての起動の案内（11/20）。Windows は新しいアプリの通知アイコンを最初は隠すので、
+    // 何も知らずに起動すると「何も起きない」ように見える。アイコンが並ぶのを少し待ってから通知を出す。
+    private void ShowFirstRunGuide()
+    {
+        var timer = new System.Windows.Forms.Timer { Interval = 2000 };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop(); timer.Dispose();
+            if (disposing) return;
+            icon.ShowBalloonTip(15000, "PartsTray を起動しました",
+                "アイコンは、タスクバーの右にある「∧」（隠れているインジケーター）の中にあります。タスクバーへドラッグすると、いつも表示されます。温度のアイコンをクリックすると設定が開きます。",
+                ToolTipIcon.Info);
+            log.Write("初めての起動の案内を出しました");
+        };
+        timer.Start();
     }
     private static bool ReadAutoStart()
     {

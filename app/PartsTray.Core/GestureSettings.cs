@@ -2,7 +2,8 @@ namespace PartsTray.Core;
 
 public sealed record GestureSettings
 {
-    public bool Enabled { get; init; } = true;
+    // 11/20：配った人の PC で、知らないうちにウィンドウの動きが変わらないよう、かざぐるマウス由来の操作は最初は切る（設定画面でオンにできる）。
+    public bool Enabled { get; init; } = false;
     public int StrokeDistancePx { get; init; } = 10;
     public int StartTimeoutMs { get; init; } = 1000;
     public int TooltipDelayMs { get; init; } = 1000;
@@ -46,14 +47,16 @@ public sealed record TrailSettings
 }
 public sealed record TitleBarSettings
 {
-    public string ShiftClick { get; init; } = "ToggleTopMost";
-    public string CtrlClick { get; init; } = "OpenExecutableFolder";
-    public string MiddleClick { get; init; } = "CloseWindow";
-    public string MinimizeButtonRightClick { get; init; } = "MinimizeToTray";
+    // 11/20：配った人の PC で、知らないうちにウィンドウの動きが変わらないよう、かざぐるマウス由来の操作は最初は切る（設定画面でオンにできる）。
+    public string ShiftClick { get; init; } = "None";
+    public string CtrlClick { get; init; } = "None";
+    public string MiddleClick { get; init; } = "None";
+    public string MinimizeButtonRightClick { get; init; } = "None";
 }
 public sealed record WheelSettings
 {
-    public bool FastScrollOnScrollBar { get; init; } = true;
+    // 11/20：配った人の PC で、知らないうちにウィンドウの動きが変わらないよう、かざぐるマウス由来の操作は最初は切る（設定画面でオンにできる）。
+    public bool FastScrollOnScrollBar { get; init; } = false;
     public int FastScrollMultiplier { get; init; } = 5;
-    public bool FocusUnderCursor { get; init; } = true;
+    public bool FocusUnderCursor { get; init; } = false;
 }
