@@ -1,0 +1,56 @@
+# v から始まるタグ（v1.1.0 など）を GitHub に送ると、テスト → exe を作る → zip にまとめる → リリースを作る、を自動で行う。
+# 手で zip を作ってアップロードしなくてよい。リリースの説明文は .github/release-notes.md。
+name: リリース
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # リリースを作るため
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: テスト
+        run: dotnet test app/PartsTray.sln -c Release
+
+      - name: exe を作る
+        run: dotnet publish app/PartsTray/PartsTray.csproj -c Release --self-contained false -o out/PartsTray
+
+      - name: zip にまとめる
+        shell: pwsh
+        run: |
+          # デバッグ用のファイルは入れない。README と LICENSE は入れる（MIT はライセンスの文を添える決まり）。
+          Remove-Item out/PartsTray/*.pdb -ErrorAction SilentlyContinue
+          Copy-Item README.md, LICENSE -Destination out/PartsTray
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $zip = "PartsTray-$version-win-x64.zip"
+          Compress-Archive -Path out/PartsTray -DestinationPath $zip
+          "ZIP=$zip" >> $env:GITHUB_ENV
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: リリースの説明を作る
+        shell: pwsh
+        run: |
+          # CHANGELOG.md の「## 版の番号」の節（次の「## 」の手前まで）を「このバージョンの変更」として先頭に置き、
+          # その後ろに、決まった使い方（.github/release-notes.md）を付ける。
+          $log = Get-Content CHANGELOG.md -Raw -Encoding utf8
+          $m = [regex]::Match($log, "(?ms)^## $([regex]::Escape($env:VERSION))[^\r\n]*\r?\n(.*?)(?=^## |\z)")
+          $notes = ""
+          if ($m.Success -and $m.Groups[1].Value.Trim()) { $notes += "## このバージョンの変更`n`n" + $m.Groups[1].Value.Trim() + "`n`n" }
+          $notes += Get-Content .github/release-notes.md -Raw -Encoding utf8
+          Set-Content release-notes.txt $notes -Encoding utf8
+
+      - name: リリースを作る
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME $env:ZIP --title "PartsTray $env:VERSION" --notes-file release-notes.txt

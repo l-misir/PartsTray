@@ -66,6 +66,7 @@ dotnet publish app/PartsTray/PartsTray.csproj -c Release --self-contained false 
 ## もっと詳しく
 
 - [app/改造の手引き.md](app/改造の手引き.md)：自分好みに変えたい人向け。何を変えたいときにどのファイルを開くか、チャット AI への頼み方
+- [CHANGELOG.md](CHANGELOG.md)：版ごとの変更。新しい版の出し方もここに書いてあります（タグを送ると、GitHub が zip を作ってリリースに置きます）
 - [app/README.md](app/README.md)：仕様と、これまでの変更の記録
 - [codex/](codex/)：実装の指示書と報告。実装は Codex が行い、Claude が指示書を書いてレビューしました
 
