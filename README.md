@@ -41,6 +41,12 @@ dotnet publish app/PartsTray/PartsTray.csproj -c Release --self-contained false 
 - [app/README.md](app/README.md)：仕様と、これまでの変更の記録
 - [codex/](codex/)：実装の指示書と報告。実装は Codex が行い、Claude が指示書を書いてレビューしました
 
+## ライセンス
+
+- このリポジトリのコードと文書：[MIT License](LICENSE)。自由に改造・配布してかまいません。そのときは、著作権とライセンスの文を残してください
+- `app/PartsTray/Assets/parrot/parrot_0.png`〜`parrot_9.png`：[RunCat365](https://github.com/runcat-dev/RunCat365) の絵です（Apache License 2.0。同じフォルダーの `LICENSE-RunCat365.txt`）
+- `app/PartsTray/Assets/parrot/partyparrot.gif`：ほかの作者による「Party Parrot」の絵です。上の MIT License の対象ではありません
+
 ---
 
 以下は、作り始めたとき（2026-11-18〜）の調査の記録です。
