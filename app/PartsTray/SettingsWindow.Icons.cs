@@ -59,6 +59,10 @@ internal sealed partial class SettingsWindow
             (s, v) => s with { Battery = s.Battery with { Bluetooth = v } });
         Check(p, "AirPods の電池を読む", "AirPods がこの PC につながっている間だけ、AirPods が飛ばす電波から読みます（10% きざみ）。人の多い場所では、まれに他の人の AirPods を拾うことがあります。", s => s.Battery.AirPods,
             (s, v) => s with { Battery = s.Battery with { AirPods = v } });
+        Check(p, "Sony のヘッドホンに直接聞く", "決まった間隔で数秒だけつないで、電池と充電中かどうかを聞きます。スマホの Sony のアプリと同時には使えないので、聞けないときは Windows の残量を使います。", s => s.Battery.SonyDirect,
+            (s, v) => s with { Battery = s.Battery with { SonyDirect = v } });
+        Number(p, "Sony のヘッドホンに聞く間隔（秒）", "短いほど、充電の始まり・終わりが早く出ます。そのぶん、スマホの Sony のアプリとぶつかりやすくなります。", 5, 600, s => s.Battery.SonyPollSeconds,
+            (s, v) => s with { Battery = s.Battery with { SonyPollSeconds = (int)v } });
         var warn = Number(p, "オレンジにする残量（%）", "この残量以下でオレンジにします。赤の残量より大きくしてください。", 2, 100, s => s.Battery.LowWarn,
             (s, v) => s with { Battery = s.Battery with { LowWarn = (int)v } });
         var hot = Number(p, "赤にする残量（%）", "この残量以下で赤にします。オレンジの残量より小さくしてください。", 1, 99, s => s.Battery.LowHot,

@@ -130,6 +130,14 @@ internal static class BluetoothBatteryReader
     }
     // AirPods（電池の値を Windows が持たない機器）かどうか。名前は利用者が変えられるので、「AirPods」を含むかだけで見る。
     public static bool IsAirPods(string name) => name.Contains("AirPods", StringComparison.OrdinalIgnoreCase);
+    // 識別子（bluetooth: と PnP インスタンス ID）から Bluetooth のアドレス（12 桁の 16 進）を取り出す。
+    // 例：…\DEV_0123456789AB\…、…&0&0123456789AB_C00000000（アドレスは例）
+    public static bool TryGetAddress(string id, out ulong address)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(id, @"DEV_([0-9A-F]{12})|&([0-9A-F]{12})_C[0-9A-F]+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        address = 0;
+        return m.Success && ulong.TryParse(m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value, System.Globalization.NumberStyles.HexNumber, null, out address);
+    }
     private static byte[]? Property(nint set, ref DeviceInfo info, PropertyKey key, uint expectedType)
     {
         SetupDiGetDevicePropertyW(set, ref info, in key, out uint type, null, 0, out uint size, 0);

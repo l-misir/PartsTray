@@ -89,9 +89,15 @@ public sealed record BatterySettings
     public int RainbowLapMs { get; init; } = 1100;
     // AirPods の電池を、AirPods が飛ばす電波から読む（Windows は AirPods の電池の値を持たないため）。11/20 追加。
     public bool AirPods { get; init; } = true;
+    // Sony のヘッドホンに数分に一度だけ短くつないで、電池と充電の状態を直接聞く（SonyBatteryPoller.cs）。11/20 追加。
+    public bool SonyDirect { get; init; } = true;
+    // Sony のヘッドホンに聞く間隔（秒）。11/20 ユーザー：「2 分は不便。せめて 20 秒、10 秒、なんなら 5 秒」。
+    public int SonyPollSeconds { get; init; } = 20;
 
     public void Validate()
     {
+        if (SonyPollSeconds is < 5 or > 600)
+            throw new InvalidDataException("battery.sonyPollSeconds は 5〜600 です");
         if (RainbowLapMs is < 200 or > 10000)
             throw new InvalidDataException("battery.rainbowLapMs は 200〜10000 です");
         if (Kinds is null || Kinds.Any(k => string.IsNullOrWhiteSpace(k.Key) || !BatteryKinds.TryParse(k.Value, out _)))

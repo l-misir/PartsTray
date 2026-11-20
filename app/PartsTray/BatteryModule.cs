@@ -24,6 +24,11 @@ internal sealed class BatteryModule : IFeatureModule
     private readonly Dictionary<DrawingKey, (Icon Icon, nint Handle)> rainbowFrames = [];
     // AirPods の電池（Windows が持たないので、AirPods が飛ばす電波から読む。AirPodsWatcher.cs）。
     private readonly AirPodsWatcher airPods;
+    private readonly BluetoothConnectionWatcher connections;   // つながった・切れたの知らせ（すぐ読み直すため）
+    private long burstUntil;   // 知らせを受けてから、この時刻（Environment.TickCount64）までは 3 秒ごとに読み直す
+    private readonly SonyBatteryPoller sony;
+    private readonly System.Windows.Forms.Timer sonyTimer = new();   // Sony のヘッドホンに聞きに行く間隔（Bluetooth の読み直しとは別）   // Sony のヘッドホンに直接聞く（充電の状態も分かる）
+    private readonly BatteryTrend trend = new();   // 残量の増え方から充電中を推測する（Windows から読む Bluetooth 機器）
     private BatterySettings settings = new();
     private string? statusText;
     private long generation;
@@ -41,6 +46,11 @@ internal sealed class BatteryModule : IFeatureModule
         gap.BatteryChanged += LogitechChanged;
         airPods = new(log);
         airPods.Changed += reading => post(() => AirPodsChanged(reading));
+        connections = new(log);
+        sony = new(log, post);
+        sony.Updated += SonyUpdated;
+        sonyTimer.Tick += (_, _) => { if (!disposed && this.settings.Enabled && this.settings.Bluetooth && this.settings.SonyDirect) sony.Consider(devices.Values.Where(IsSonyCandidate)); };
+        connections.Changed += Burst;
         foreach (var value in gap.Batteries) devices[value.Id] = value;
         // 5 秒ごとに描き直す（通知領域で並べ替え中に描き替えを見送った分を、離した後に反映するため）。
         // 明暗の変更は共通の TaskbarTheme が通知する。ここでは並べ替え後の再描画を補う。
@@ -71,6 +81,8 @@ internal sealed class BatteryModule : IFeatureModule
         if (disposed) return;
         settings = value.Battery;
         rainbowTimer.Interval = Math.Max(15, settings.RainbowLapMs / RainbowSteps);
+        sony.Every = TimeSpan.FromSeconds(settings.SonyPollSeconds);
+        sonyTimer.Interval = settings.SonyPollSeconds * 1000; sonyTimer.Enabled = settings.Enabled && settings.Bluetooth && settings.SonyDirect;
         Interlocked.Increment(ref generation);
         bluetoothTimer.Change(settings.Enabled && settings.Bluetooth ? 0 : Timeout.Infinite, BluetoothPeriod());
         UpdateAirPodsWatcher();
@@ -90,7 +102,26 @@ internal sealed class BatteryModule : IFeatureModule
         airPods.SetRunning(run);
         if (run == airPodsActive || disposed) return;
         airPodsActive = run;
-        if (settings.Enabled && settings.Bluetooth) bluetoothTimer.Change(BluetoothPeriod(), BluetoothPeriod());
+        // つないだ直後の 3 秒ごとの読み直し（Burst）の途中なら、間隔はそのまま。終わるときに PollBluetooth がふだんの間隔に戻す。
+        if (settings.Enabled && settings.Bluetooth && Volatile.Read(ref burstUntil) == 0) bluetoothTimer.Change(BluetoothPeriod(), BluetoothPeriod());
+    }
+    // Bluetooth の機器がつながった・切れたら、1.5 秒後から 20 秒間、3 秒ごとに読み直す。
+    // つないだ直後は、Windows が電池の値や音の出入り口を用意するまで数秒かかるため、1 回では足りない。
+    private void Burst()
+    {
+        if (disposed || !settings.Enabled || !settings.Bluetooth) return;
+        Volatile.Write(ref burstUntil, Environment.TickCount64 + 20000);
+        bluetoothTimer.Change(1500, 3000);
+    }
+    // Sony の可能性がある機器：Windows から読む Bluetooth のヘッドホン・イヤホン（AirPods は除く）。通り道がなければ一度で外れる。
+    private static bool IsSonyCandidate(BatteryDevice d) => d.Id.StartsWith("bluetooth:", StringComparison.Ordinal) &&
+        !BluetoothBatteryReader.IsAirPods(d.Name) && d.Kind is BatteryDeviceKind.Headphones or BatteryDeviceKind.Earbuds;
+    private void SonyUpdated()
+    {
+        if (disposed || !settings.SonyDirect) return;
+        foreach (var (id, device) in devices.ToArray())
+            if (device.Connected && sony.Latest(id) is { } direct) devices[id] = device with { Reading = direct, UpdatedAt = DateTime.UtcNow };
+        Render();
     }
     private void AirPodsChanged(AirPodsReading value)
     {
@@ -103,6 +134,9 @@ internal sealed class BatteryModule : IFeatureModule
     private void PollBluetooth()
     {
         if (disposed || Interlocked.Exchange(ref polling, 1) != 0) return;
+        long until = Volatile.Read(ref burstUntil);   // 読み直しの続く時間が過ぎたら、ふだんの間隔に戻す
+        if (until != 0 && Environment.TickCount64 > until && Interlocked.CompareExchange(ref burstUntil, 0, until) == until)
+            bluetoothTimer.Change(BluetoothPeriod(), BluetoothPeriod());
         long version = Interlocked.Read(ref generation);
         try
         {
@@ -117,19 +151,40 @@ internal sealed class BatteryModule : IFeatureModule
                     seen.Add(value.Id);
                     // AirPods は電池の値なしで届くので、電波から読んだ前の値を引き継ぐ。
                     if (value.Reading is null && devices.TryGetValue(value.Id, out var last)) value = value with { Reading = last.Reading, UpdatedAt = last.UpdatedAt };
+                    // Sony のヘッドホンに直接聞いた値があれば、それを使う（残量も充電の状態も本物）。
+                    else if (sample.Reading is not null && settings.SonyDirect && sony.Latest(value.Id) is { } direct)
+                    {
+                        // 推測の基準（前の残量）も最新にしておく。直接聞けなくなって Windows の値に戻ったとき、古い基準と比べて充電中と見間違えないため。
+                        trend.Update(value.Id, direct.Percent, value.Connected, DateTime.UtcNow);
+                        value = value with { Reading = direct };
+                    }
+                    // Windows から読んだ残量（充電中かどうかは分からない）は、残量の増え方から充電中かを推測する（BatteryTrend.cs）。
+                    else if (sample.Reading is { Charge: BatteryCharge.Unknown } windows)
+                    {
+                        var charge = trend.Update(value.Id, windows.Percent, value.Connected, DateTime.UtcNow);
+                        if (charge != BatteryCharge.Unknown) value = value with { Reading = windows with { Charge = charge, Detail = BatteryTrend.Note } };
+                    }
                     devices[value.Id] = !value.Connected && devices.TryGetValue(value.Id, out var old)
-                        ? value with { Reading = old.Reading, UpdatedAt = old.UpdatedAt } : value;
+                        ? value with { Reading = WithoutGuess(old.Reading), UpdatedAt = old.UpdatedAt } : value;
                 }
                 foreach (var (id, value) in devices.ToArray())
                     if (id.StartsWith("bluetooth:", StringComparison.Ordinal) && !seen.Contains(id))
-                        devices[id] = value with { Connected = false };
+                    {
+                        trend.Update(id, 0, connected: false, DateTime.UtcNow);
+                        devices[id] = value with { Connected = false, Reading = WithoutGuess(value.Reading) };
+                    }
                 UpdateAirPodsWatcher();
+                if (settings.SonyDirect) sony.Consider(devices.Values.Where(IsSonyCandidate));
                 Render();
             });
         }
         catch (Exception ex) { if (!disposed) log.Write($"Bluetooth 電池の読取: {ex.Message}"); }
         finally { Volatile.Write(ref polling, 0); }
     }
+    // 切断した Bluetooth の機器は、充電の状態を外す（切断中は充電しているか分からない。直接聞いた値も、推測も同じ）。
+    // 推測の断り書きも消す。AirPods の左右・ケースの内訳は残す。
+    private static BatteryReading? WithoutGuess(BatteryReading? reading) => reading is null ? null :
+        reading with { Charge = BatteryCharge.Unknown, ExternalPower = false, Detail = reading.Detail == BatteryTrend.Note ? null : reading.Detail };
     private static int IconSize()
     {
         nint taskbar = Native.FindWindow("Shell_TrayWnd", null);
@@ -213,7 +268,7 @@ internal sealed class BatteryModule : IFeatureModule
         theme.Changed -= Render;
         gap.BatteryChanged -= LogitechChanged;
         bluetoothTimer.Dispose(); themeTimer.Stop(); themeTimer.Dispose();
-        rainbowTimer.Stop(); rainbowTimer.Dispose(); airPods.Dispose();
+        rainbowTimer.Stop(); rainbowTimer.Dispose(); airPods.Dispose(); connections.Dispose(); sony.Dispose(); sonyTimer.Stop(); sonyTimer.Dispose();
         foreach (var slot in pool) slot.Dispose();
         ClearRainbowFrames();
     }
