@@ -1,0 +1,724 @@
+{
+  "receiver": {
+    "pid": "0xC548",
+    "name": "Logi Bolt"
+  },
+  "probed_at": "2026-11-18 22:39:41",
+  "devices": {
+    "2": {
+      "name": "MX Master 4",
+      "protocol": "4.5",
+      "features": [
+        {
+          "index": 0,
+          "id": "0x0000",
+          "name": "ROOT",
+          "version": 0
+        },
+        {
+          "index": 1,
+          "id": "0x0001",
+          "name": "FEATURE_SET",
+          "version": 2
+        },
+        {
+          "index": 2,
+          "id": "0x0003",
+          "name": "DEVICE_FW_VERSION",
+          "version": 8
+        },
+        {
+          "index": 3,
+          "id": "0x0005",
+          "name": "DEVICE_NAME",
+          "version": 5
+        },
+        {
+          "index": 4,
+          "id": "0x1D4B",
+          "name": "WIRELESS_DEVICE_STATUS",
+          "version": 0
+        },
+        {
+          "index": 5,
+          "id": "0x0020",
+          "name": "CONFIG_CHANGE",
+          "version": 1
+        },
+        {
+          "index": 6,
+          "id": "0x0021",
+          "name": "CRYPTO_ID",
+          "version": 1
+        },
+        {
+          "index": 7,
+          "id": "0x0007",
+          "name": "DEVICE_FRIENDLY_NAME",
+          "version": 0
+        },
+        {
+          "index": 8,
+          "id": "0x0011",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 9,
+          "id": "0x1004",
+          "name": "UNIFIED_BATTERY",
+          "version": 5
+        },
+        {
+          "index": 10,
+          "id": "0x1701",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 11,
+          "id": "0x19B0",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 12,
+          "id": "0x19C0",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 13,
+          "id": "0x1B04",
+          "name": "REPROG_CONTROLS_V4",
+          "version": 6
+        },
+        {
+          "index": 14,
+          "id": "0x1814",
+          "name": "CHANGE_HOST",
+          "version": 2
+        },
+        {
+          "index": 15,
+          "id": "0x1815",
+          "name": "HOSTS_INFO",
+          "version": 2
+        },
+        {
+          "index": 16,
+          "id": "0x2250",
+          "name": "XY_STATS",
+          "version": 1
+        },
+        {
+          "index": 17,
+          "id": "0x2111",
+          "name": "SMART_SHIFT_ENHANCED",
+          "version": 0
+        },
+        {
+          "index": 18,
+          "id": "0x2121",
+          "name": "HIRES_WHEEL",
+          "version": 1
+        },
+        {
+          "index": 19,
+          "id": "0x2150",
+          "name": "THUMB_WHEEL",
+          "version": 0
+        },
+        {
+          "index": 20,
+          "id": "0x2201",
+          "name": "ADJUSTABLE_DPI",
+          "version": 2
+        },
+        {
+          "index": 21,
+          "id": "0x2251",
+          "name": "WHEEL_STATS",
+          "version": 0
+        },
+        {
+          "index": 22,
+          "id": "0x00D1",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 23,
+          "id": "0x1802",
+          "name": "DEVICE_RESET",
+          "version": 0
+        },
+        {
+          "index": 24,
+          "id": "0x1803",
+          "name": "",
+          "version": 1
+        },
+        {
+          "index": 25,
+          "id": "0x1807",
+          "name": "",
+          "version": 4
+        },
+        {
+          "index": 26,
+          "id": "0x1816",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 27,
+          "id": "0x1805",
+          "name": "OOBSTATE",
+          "version": 0
+        },
+        {
+          "index": 28,
+          "id": "0x1830",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 29,
+          "id": "0x1891",
+          "name": "",
+          "version": 9
+        },
+        {
+          "index": 30,
+          "id": "0x18A1",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 31,
+          "id": "0x1E00",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 32,
+          "id": "0x1E02",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 33,
+          "id": "0x1E22",
+          "name": "",
+          "version": 1
+        },
+        {
+          "index": 34,
+          "id": "0x1E30",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 35,
+          "id": "0x1602",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 36,
+          "id": "0x1EB0",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 37,
+          "id": "0x1861",
+          "name": "",
+          "version": 1
+        },
+        {
+          "index": 38,
+          "id": "0x9205",
+          "name": "",
+          "version": 1
+        },
+        {
+          "index": 39,
+          "id": "0x9201",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 40,
+          "id": "0x9300",
+          "name": "",
+          "version": 1
+        },
+        {
+          "index": 41,
+          "id": "0x9401",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 42,
+          "id": "0x9402",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 43,
+          "id": "0x9001",
+          "name": "",
+          "version": 1
+        },
+        {
+          "index": 44,
+          "id": "0x18B1",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 45,
+          "id": "0x18C0",
+          "name": "",
+          "version": 0
+        }
+      ],
+      "dpi": {
+        "current": 2200,
+        "default": 1000,
+        "list": [
+          "200",
+          "(刻み50)",
+          "8000"
+        ]
+      },
+      "controls": [
+        {
+          "cid": "0x0050",
+          "tid": "0x0038",
+          "flags": 1025,
+          "reporting_flags": 0,
+          "remap": "0x0000"
+        },
+        {
+          "cid": "0x0051",
+          "tid": "0x0039",
+          "flags": 1025,
+          "reporting_flags": 0,
+          "remap": "0x0000"
+        },
+        {
+          "cid": "0x0052",
+          "tid": "0x003A",
+          "flags": 1329,
+          "reporting_flags": 1,
+          "remap": "0x0052"
+        },
+        {
+          "cid": "0x0053",
+          "tid": "0x003C",
+          "flags": 1329,
+          "reporting_flags": 1,
+          "remap": "0x0053"
+        },
+        {
+          "cid": "0x0056",
+          "tid": "0x003E",
+          "flags": 1329,
+          "reporting_flags": 1,
+          "remap": "0x0056"
+        },
+        {
+          "cid": "0x00C3",
+          "tid": "0x009C",
+          "flags": 1329,
+          "reporting_flags": 1,
+          "remap": "0x00C3"
+        },
+        {
+          "cid": "0x00C4",
+          "tid": "0x009D",
+          "flags": 1329,
+          "reporting_flags": 1,
+          "remap": "0x00C4"
+        },
+        {
+          "cid": "0x01A0",
+          "tid": "0x0109",
+          "flags": 1329,
+          "reporting_flags": 1,
+          "remap": "0x01A0"
+        },
+        {
+          "cid": "0x00D7",
+          "tid": "0x00B4",
+          "flags": 928,
+          "reporting_flags": 0,
+          "remap": "0x0000"
+        }
+      ]
+    },
+    "3": {
+      "name": "MX Keys S",
+      "protocol": "4.5",
+      "features": [
+        {
+          "index": 0,
+          "id": "0x0000",
+          "name": "ROOT",
+          "version": 0
+        },
+        {
+          "index": 1,
+          "id": "0x0001",
+          "name": "FEATURE_SET",
+          "version": 2
+        },
+        {
+          "index": 2,
+          "id": "0x0003",
+          "name": "DEVICE_FW_VERSION",
+          "version": 4
+        },
+        {
+          "index": 3,
+          "id": "0x0005",
+          "name": "DEVICE_NAME",
+          "version": 0
+        },
+        {
+          "index": 4,
+          "id": "0x1D4B",
+          "name": "WIRELESS_DEVICE_STATUS",
+          "version": 0
+        },
+        {
+          "index": 5,
+          "id": "0x0020",
+          "name": "CONFIG_CHANGE",
+          "version": 0
+        },
+        {
+          "index": 6,
+          "id": "0x0007",
+          "name": "DEVICE_FRIENDLY_NAME",
+          "version": 0
+        },
+        {
+          "index": 7,
+          "id": "0x0011",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 8,
+          "id": "0x1004",
+          "name": "UNIFIED_BATTERY",
+          "version": 3
+        },
+        {
+          "index": 9,
+          "id": "0x1B04",
+          "name": "REPROG_CONTROLS_V4",
+          "version": 5
+        },
+        {
+          "index": 10,
+          "id": "0x1814",
+          "name": "CHANGE_HOST",
+          "version": 2
+        },
+        {
+          "index": 11,
+          "id": "0x1815",
+          "name": "HOSTS_INFO",
+          "version": 2
+        },
+        {
+          "index": 12,
+          "id": "0x1982",
+          "name": "BACKLIGHT2",
+          "version": 3
+        },
+        {
+          "index": 13,
+          "id": "0x40A3",
+          "name": "K375S_FN_INVERSION",
+          "version": 0
+        },
+        {
+          "index": 14,
+          "id": "0x4220",
+          "name": "LOCK_KEY_STATE",
+          "version": 0
+        },
+        {
+          "index": 15,
+          "id": "0x4521",
+          "name": "KEYBOARD_DISABLE_KEYS",
+          "version": 0
+        },
+        {
+          "index": 16,
+          "id": "0x4531",
+          "name": "MULTIPLATFORM",
+          "version": 1
+        },
+        {
+          "index": 17,
+          "id": "0x4540",
+          "name": "KEYBOARD_LAYOUT_2",
+          "version": 0
+        },
+        {
+          "index": 18,
+          "id": "0x00C3",
+          "name": "DFUCONTROL",
+          "version": 0
+        },
+        {
+          "index": 19,
+          "id": "0x1802",
+          "name": "DEVICE_RESET",
+          "version": 0
+        },
+        {
+          "index": 20,
+          "id": "0x1803",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 21,
+          "id": "0x1807",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 22,
+          "id": "0x1816",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 23,
+          "id": "0x1805",
+          "name": "OOBSTATE",
+          "version": 0
+        },
+        {
+          "index": 24,
+          "id": "0x1830",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 25,
+          "id": "0x1891",
+          "name": "",
+          "version": 9
+        },
+        {
+          "index": 26,
+          "id": "0x18A1",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 27,
+          "id": "0x1E00",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 28,
+          "id": "0x1E02",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 29,
+          "id": "0x1602",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 30,
+          "id": "0x1EB0",
+          "name": "",
+          "version": 0
+        },
+        {
+          "index": 31,
+          "id": "0x1861",
+          "name": "",
+          "version": 1
+        },
+        {
+          "index": 32,
+          "id": "0x1A20",
+          "name": "",
+          "version": 1
+        },
+        {
+          "index": 33,
+          "id": "0x18B0",
+          "name": "",
+          "version": 1
+        }
+      ],
+      "controls": [
+        {
+          "cid": "0x00C7",
+          "tid": "0x00A3",
+          "flags": 1082,
+          "reporting_flags": 1,
+          "remap": "0x00C7"
+        },
+        {
+          "cid": "0x00C8",
+          "tid": "0x00A4",
+          "flags": 1082,
+          "reporting_flags": 1,
+          "remap": "0x00C8"
+        },
+        {
+          "cid": "0x00E2",
+          "tid": "0x00C1",
+          "flags": 1082,
+          "reporting_flags": 0,
+          "remap": "0x00E2"
+        },
+        {
+          "cid": "0x00E3",
+          "tid": "0x00C2",
+          "flags": 1082,
+          "reporting_flags": 0,
+          "remap": "0x00E3"
+        },
+        {
+          "cid": "0x0103",
+          "tid": "0x00D8",
+          "flags": 1082,
+          "reporting_flags": 1,
+          "remap": "0x0103"
+        },
+        {
+          "cid": "0x0108",
+          "tid": "0x00DD",
+          "flags": 1082,
+          "reporting_flags": 1,
+          "remap": "0x0108"
+        },
+        {
+          "cid": "0x011C",
+          "tid": "0x00F1",
+          "flags": 1082,
+          "reporting_flags": 1,
+          "remap": "0x011C"
+        },
+        {
+          "cid": "0x00E4",
+          "tid": "0x0006",
+          "flags": 1082,
+          "reporting_flags": 1,
+          "remap": "0x00E4"
+        },
+        {
+          "cid": "0x00E5",
+          "tid": "0x0004",
+          "flags": 1082,
+          "reporting_flags": 1,
+          "remap": "0x00E5"
+        },
+        {
+          "cid": "0x00E6",
+          "tid": "0x0005",
+          "flags": 1082,
+          "reporting_flags": 1,
+          "remap": "0x00E6"
+        },
+        {
+          "cid": "0x00E7",
+          "tid": "0x0003",
+          "flags": 1082,
+          "reporting_flags": 1,
+          "remap": "0x00E7"
+        },
+        {
+          "cid": "0x00E8",
+          "tid": "0x0002",
+          "flags": 1082,
+          "reporting_flags": 1,
+          "remap": "0x00E8"
+        },
+        {
+          "cid": "0x00E9",
+          "tid": "0x0001",
+          "flags": 1076,
+          "reporting_flags": 1,
+          "remap": "0x00E9"
+        },
+        {
+          "cid": "0x000A",
+          "tid": "0x000A",
+          "flags": 1076,
+          "reporting_flags": 1,
+          "remap": "0x000A"
+        },
+        {
+          "cid": "0x010A",
+          "tid": "0x00DF",
+          "flags": 1076,
+          "reporting_flags": 1,
+          "remap": "0x010A"
+        },
+        {
+          "cid": "0x00EA",
+          "tid": "0x00C3",
+          "flags": 1076,
+          "reporting_flags": 1,
+          "remap": "0x00EA"
+        },
+        {
+          "cid": "0x006F",
+          "tid": "0x0044",
+          "flags": 1076,
+          "reporting_flags": 1,
+          "remap": "0x006F"
+        },
+        {
+          "cid": "0x00D1",
+          "tid": "0x00AE",
+          "flags": 1028,
+          "reporting_flags": 0,
+          "remap": "0x0000"
+        },
+        {
+          "cid": "0x00D2",
+          "tid": "0x00AF",
+          "flags": 1028,
+          "reporting_flags": 0,
+          "remap": "0x0000"
+        },
+        {
+          "cid": "0x00D3",
+          "tid": "0x00B0",
+          "flags": 1028,
+          "reporting_flags": 0,
+          "remap": "0x0000"
+        },
+        {
+          "cid": "0x00DE",
+          "tid": "0x0062",
+          "flags": 1024,
+          "reporting_flags": 0,
+          "remap": "0x0000"
+        }
+      ]
+    }
+  }
+}

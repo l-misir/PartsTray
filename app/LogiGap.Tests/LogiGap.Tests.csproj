@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net9.0</TargetFramework><IsPackable>false</IsPackable><IsTestProject>true</IsTestProject></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2"><PrivateAssets>all</PrivateAssets></PackageReference>
+    <ProjectReference Include="../LogiGap.Core/LogiGap.Core.csproj" />
+    <None Update="Fixtures/sniff_20261118_224803.log" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures/sniff_20261118_230321.log" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

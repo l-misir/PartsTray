@@ -1,0 +1,7 @@
+# 作り直せるもの・ダウンロードしたもの・ログは残さない
+# （app/ の中のビルドの出力や NuGet の部品は app/.gitignore で外している）
+.venv/
+__pycache__/
+*.pyc
+logs/
+app/publish/
