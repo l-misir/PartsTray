@@ -207,9 +207,9 @@ internal sealed class GapModule : IFeatureModule
     }
     public IEnumerable<ToolStripItem> CreateMenuItems()
     {
-        var pause = pauseItem = new ToolStripMenuItem("つなぎ役を一時停止") { Visible = enabled };
-        pause.Click += (_, _) => { if (!enabled) return; Session.SetPaused(!Session.IsPaused); pause.Text = Session.IsPaused ? "つなぎ役を再開" : "つなぎ役を一時停止"; };
-        pause.OwnerChanged += (_, _) => { if (pause.Owner is ContextMenuStrip menu) menu.Opening += (_, _) => pause.Text = Session.IsPaused ? "つなぎ役を再開" : "つなぎ役を一時停止"; };
+        var pause = pauseItem = new ToolStripMenuItem("肩代わりを一時停止") { Visible = enabled };
+        pause.Click += (_, _) => { if (!enabled) return; Session.SetPaused(!Session.IsPaused); pause.Text = Session.IsPaused ? "肩代わりを再開" : "肩代わりを一時停止"; };
+        pause.OwnerChanged += (_, _) => { if (pause.Owner is ContextMenuStrip menu) menu.Opening += (_, _) => pause.Text = Session.IsPaused ? "肩代わりを再開" : "肩代わりを一時停止"; };
         yield return pause;
     }
     public void SettingsChanged(AppSettings settings)

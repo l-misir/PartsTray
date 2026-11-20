@@ -57,6 +57,8 @@ internal sealed partial class SettingsWindow
             (s, v) => s with { Battery = s.Battery with { Logitech = v } });
         Check(p, "Bluetooth の機器", "Windows から電池残量を取得できる Bluetooth 機器を表示します。", s => s.Battery.Bluetooth,
             (s, v) => s with { Battery = s.Battery with { Bluetooth = v } });
+        Check(p, "AirPods の電池を読む", "AirPods がこの PC につながっている間だけ、AirPods が飛ばす電波から読みます（10% きざみ）。人の多い場所では、まれに他の人の AirPods を拾うことがあります。", s => s.Battery.AirPods,
+            (s, v) => s with { Battery = s.Battery with { AirPods = v } });
         var warn = Number(p, "オレンジにする残量（%）", "この残量以下でオレンジにします。赤の残量より大きくしてください。", 2, 100, s => s.Battery.LowWarn,
             (s, v) => s with { Battery = s.Battery with { LowWarn = (int)v } });
         var hot = Number(p, "赤にする残量（%）", "この残量以下で赤にします。オレンジの残量より小さくしてください。", 1, 99, s => s.Battery.LowHot,

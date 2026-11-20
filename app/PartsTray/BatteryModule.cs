@@ -22,6 +22,8 @@ internal sealed class BatteryModule : IFeatureModule
     private readonly System.Windows.Forms.Timer rainbowTimer = new();
     private readonly System.Diagnostics.Stopwatch rainbowClock = System.Diagnostics.Stopwatch.StartNew();
     private readonly Dictionary<DrawingKey, (Icon Icon, nint Handle)> rainbowFrames = [];
+    // AirPods の電池（Windows が持たないので、AirPods が飛ばす電波から読む。AirPodsWatcher.cs）。
+    private readonly AirPodsWatcher airPods;
     private BatterySettings settings = new();
     private string? statusText;
     private long generation;
@@ -37,6 +39,8 @@ internal sealed class BatteryModule : IFeatureModule
         for (int i = 0; i < pool.Length; i++) TrayIds.Check(pool[i].Target, TrayIds.BatteryFirst + i, log);
         bluetoothTimer = new(_ => PollBluetooth(), null, Timeout.Infinite, Timeout.Infinite);
         gap.BatteryChanged += LogitechChanged;
+        airPods = new(log);
+        airPods.Changed += reading => post(() => AirPodsChanged(reading));
         foreach (var value in gap.Batteries) devices[value.Id] = value;
         // 5 秒ごとに描き直す（通知領域で並べ替え中に描き替えを見送った分を、離した後に反映するため）。
         // 明暗の変更は共通の TaskbarTheme が通知する。ここでは並べ替え後の再描画を補う。
@@ -68,8 +72,32 @@ internal sealed class BatteryModule : IFeatureModule
         settings = value.Battery;
         rainbowTimer.Interval = Math.Max(15, settings.RainbowLapMs / RainbowSteps);
         Interlocked.Increment(ref generation);
-        bluetoothTimer.Change(settings.Enabled && settings.Bluetooth ? 0 : Timeout.Infinite,
-            settings.BluetoothPollSeconds * 1000);
+        bluetoothTimer.Change(settings.Enabled && settings.Bluetooth ? 0 : Timeout.Infinite, BluetoothPeriod());
+        UpdateAirPodsWatcher();
+        Render();
+    }
+    // AirPods の電波を受け取っている間は、つながっているかを 5 秒ごとに確かめる（ふだんは BluetoothPollSeconds ごと）。
+    // 切断に早く気づいて受け取りを止め、アイコンを隠すため（11/20 ユーザー：「つながってないのに他の人のやつが表示されたりしないですよね？」）。
+    private const int AirPodsPollMs = 5000;
+    private bool airPodsActive;
+    private int BluetoothPeriod() => airPodsActive ? AirPodsPollMs : settings.BluetoothPollSeconds * 1000;
+    // AirPods がこの PC につながっている間だけ、電波を受け取る（周りの人の AirPods の電波をむやみに拾わないため）。
+    // つながっていないあいだは受け取らないので、他の人の AirPods がアイコンに出ることはない（切断中のイヤホンは BatteryLayout が隠す）。
+    private void UpdateAirPodsWatcher()
+    {
+        bool run = !disposed && settings.Enabled && settings.Bluetooth && settings.AirPods &&
+            devices.Values.Any(d => d.Connected && d.Id.StartsWith("bluetooth:", StringComparison.Ordinal) && BluetoothBatteryReader.IsAirPods(d.Name));
+        airPods.SetRunning(run);
+        if (run == airPodsActive || disposed) return;
+        airPodsActive = run;
+        if (settings.Enabled && settings.Bluetooth) bluetoothTimer.Change(BluetoothPeriod(), BluetoothPeriod());
+    }
+    private void AirPodsChanged(AirPodsReading value)
+    {
+        if (disposed || !settings.AirPods || AirPods.ToReading(value) is not { } reading) return;
+        foreach (var (id, device) in devices.ToArray())
+            if (device.Connected && id.StartsWith("bluetooth:", StringComparison.Ordinal) && BluetoothBatteryReader.IsAirPods(device.Name))
+                devices[id] = device with { Reading = reading, UpdatedAt = DateTime.UtcNow };
         Render();
     }
     private void PollBluetooth()
@@ -83,15 +111,19 @@ internal sealed class BatteryModule : IFeatureModule
             {
                 if (disposed || version != Interlocked.Read(ref generation) || !settings.Enabled || !settings.Bluetooth) return;
                 var seen = new HashSet<string>();
-                foreach (var value in samples)
+                foreach (var sample in samples)
                 {
+                    var value = sample;
                     seen.Add(value.Id);
+                    // AirPods は電池の値なしで届くので、電波から読んだ前の値を引き継ぐ。
+                    if (value.Reading is null && devices.TryGetValue(value.Id, out var last)) value = value with { Reading = last.Reading, UpdatedAt = last.UpdatedAt };
                     devices[value.Id] = !value.Connected && devices.TryGetValue(value.Id, out var old)
                         ? value with { Reading = old.Reading, UpdatedAt = old.UpdatedAt } : value;
                 }
                 foreach (var (id, value) in devices.ToArray())
                     if (id.StartsWith("bluetooth:", StringComparison.Ordinal) && !seen.Contains(id))
                         devices[id] = value with { Connected = false };
+                UpdateAirPodsWatcher();
                 Render();
             });
         }
@@ -181,7 +213,7 @@ internal sealed class BatteryModule : IFeatureModule
         theme.Changed -= Render;
         gap.BatteryChanged -= LogitechChanged;
         bluetoothTimer.Dispose(); themeTimer.Stop(); themeTimer.Dispose();
-        rainbowTimer.Stop(); rainbowTimer.Dispose();
+        rainbowTimer.Stop(); rainbowTimer.Dispose(); airPods.Dispose();
         foreach (var slot in pool) slot.Dispose();
         ClearRainbowFrames();
     }

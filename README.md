@@ -7,7 +7,7 @@ Windows 11 のタスクバーの右端（通知領域）に常駐する、小さ
 左から、オウム（CPU 使用率に合わせて速く回る）・CPU 使用率・CPU 温度・メモリ使用率・マウスの電池（100%・充電完了）・キーボードの電池（100%）。実際のタスクバーを録ったものを 2 倍に拡大しています。
 
 - **周辺機器の電池**：機器ごとに、残量の分だけの輪と機器の絵を出します。充電中は黄色の稲妻が付き、100% になると輪が虹色になって回ります。
-  - 対象：Logi Bolt でつないだロジクールの機器と、Windows が電池の残量を読める Bluetooth 機器（ロジクール以外も可）
+  - 対象：Logi Bolt でつないだロジクールの機器、Windows が電池の残量を読める Bluetooth 機器（ロジクール以外も可）、AirPods
   - 絵：マウス・キーボード・ヘッドホン・イヤホン・ゲームパッド・その他。種類は自動で見分け、設定画面で選び直すこともできます
 - **CPU・温度・メモリ**：CPU 使用率に合わせて速く回るパーティーパロットと、数字のアイコン
 - **マウスジェスチャー**：右ボタンを押したまま動かして、戻る・進む・更新・閉じる・最小化（かざぐるマウス風。軌跡も出ます）
@@ -61,7 +61,7 @@ dotnet publish app/PartsTray/PartsTray.csproj -c Release --self-contained false 
 
 - 温度は、PC によっては取れません（ACPI の温度を出さない PC）。そのときは、設定の「温度の読み方」で Core Temp を選んでください（Core Temp の起動と、共有メモリの有効化が必要です）
 - ロジクールの機器の電池は、Logi Bolt の受信機につないだものだけ読めます（古い Unifying の受信機は読めません）。Bluetooth でつないだ機器は、Windows が電池の残量を読めれば表示されます
-- AirPods は、Windows が電池の残量を出さないので表示されません
+- AirPods は、Windows が電池の残量を持っていないので、AirPods が近くの iPhone 向けに飛ばしている電波から読みます（AirPods 4 で確認）。値は 10% きざみで、AirPods がこの PC につながっている間だけ読みます（つながっていないときは何も表示しません）。人の多い場所では、まれに他の人の AirPods を拾うことがあります。使わないときは、設定の「AirPods の電池を読む」を切ってください
 
 ## もっと詳しく
 
@@ -86,8 +86,8 @@ dotnet publish app/PartsTray/PartsTray.csproj -c Release --self-contained false 
 | `probe.bat` / `tools/probe.py` | 接続機器と HID++ 機能の一覧を調べる。問い合わせだけで、設定は変えない。結果は `data/devices.json` に保存 |
 | `sniff.bat` / `tools/sniff.py` | レシーバー上の通信を聞くだけで記録する（送信はしない）。抜き差しにも追従する |
 | `sniff_quiet.bat` | sniff の常駐用。画面には要点（★）だけを出す。所要時間は `logs/timeline.csv` に追記していく |
-| `logigap/hidpp.py` | HID++ の最小実装（hidapi 経由） |
-| `logigap/decode.py` | 受信した通信の解読。ツールと本体で共用する |
+| `hidtools/hidpp.py` | HID++ の最小実装（hidapi 経由） |
+| `hidtools/decode.py` | 受信した通信の解読。ツールと本体で共用する |
 
 ## 実機で分かったこと
 

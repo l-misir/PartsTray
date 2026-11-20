@@ -87,6 +87,8 @@ public sealed record BatterySettings
     // RainbowLapMs は虹が 1 周する時間。見本（1.9 秒）の 1.5〜2 倍の速さにしてほしい、とのことで既定は 1100。
     public bool RainbowWhenFull { get; init; } = true;
     public int RainbowLapMs { get; init; } = 1100;
+    // AirPods の電池を、AirPods が飛ばす電波から読む（Windows は AirPods の電池の値を持たないため）。11/20 追加。
+    public bool AirPods { get; init; } = true;
 
     public void Validate()
     {

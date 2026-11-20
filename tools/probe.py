@@ -18,8 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from logigap.decode import DEVICES_JSON  # noqa: E402
-from logigap.hidpp import (CID_NAMES, DEFAULT_SWID, FEATURE_NAMES, Device,  # noqa: E402
+from hidtools.decode import DEVICES_JSON  # noqa: E402
+from hidtools.hidpp import (CID_NAMES, DEFAULT_SWID, FEATURE_NAMES, Device,  # noqa: E402
                            HidppError, Receiver)
 
 KEY_FLAGS = [

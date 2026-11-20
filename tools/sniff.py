@@ -25,8 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
-from logigap.decode import WHO_OPTIONS, decode, load_devices  # noqa: E402
-from logigap.hidpp import DEFAULT_SWID, Msg, Receiver, find_receiver  # noqa: E402
+from hidtools.decode import WHO_OPTIONS, decode, load_devices  # noqa: E402
+from hidtools.hidpp import DEFAULT_SWID, Msg, Receiver, find_receiver  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 TIMELINE_CSV = ROOT / "logs" / "timeline.csv"

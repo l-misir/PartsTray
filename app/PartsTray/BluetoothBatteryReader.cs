@@ -80,7 +80,7 @@ internal static class BluetoothBatteryReader
         var kinds = ReadKinds();
         nint set = SetupDiGetClassDevsW(0, null, 0, 2 | 4);   // DIGCF_PRESENT | DIGCF_ALLCLASSES
         if (set == -1) throw new Win32Exception();
-        var found = new List<(string Id, string Name, Guid? Container, bool Started, byte Battery)>();
+        var found = new List<(string Id, string Name, Guid? Container, bool Started, byte? Battery)>();
         var live = new HashSet<Guid>();   // つながっている間だけ現れる部品がある入れ物
         try
         {
@@ -98,18 +98,22 @@ internal static class BluetoothBatteryReader
                 string instance = id.ToString();
                 bool liveKind = instance.StartsWith(@"SWD\MMDEVAPI\", StringComparison.OrdinalIgnoreCase) ||
                     instance.StartsWith(@"HID\", StringComparison.OrdinalIgnoreCase);
+                // Bluetooth の機器そのものの部品。AirPods は電池の値を持たないので、名前で見つけて電池なしで返す（値は AirPodsWatcher が埋める）。
+                bool device = instance.StartsWith(@"BTHENUM\DEV_", StringComparison.OrdinalIgnoreCase) ||
+                    instance.StartsWith(@"BTHLE\DEV_", StringComparison.OrdinalIgnoreCase);
                 var battery = Property(set, ref info, BatteryKey, 3); // HID 自身に電池がある機器も読む。DEVPROP_TYPE_BYTE
                 bool hasBattery = battery is { Length: 1 } && battery[0] <= 100;
-                if (!liveKind && !hasBattery) continue;
+                if (!liveKind && !hasBattery && !device) continue;
                 Guid? container = Property(set, ref info, ContainerKey, 0x0D) is { Length: 16 } bytes ? new Guid(bytes) : null; // DEVPROP_TYPE_GUID
                 if (container == Guid.Empty) container = null;
                 if (liveKind && container is { } c) live.Add(c);
-                if (!hasBattery) continue;
+                if (!hasBattery && !device) continue;
                 var nameBytes = Property(set, ref info, FriendlyNameKey, 0x12); // DEVPROP_TYPE_STRING
                 // 要確認: 名前を取れない機器は PnP インスタンス ID で表示。識別子もこれを使い、同名の別機器を混同しない。
                 string name = nameBytes == null ? instance : BatteryMath.BluetoothName(Encoding.Unicode.GetString(nameBytes).TrimEnd('\0'));
+                if (!hasBattery && !IsAirPods(name)) continue;
                 bool started = CM_Get_DevNode_Status(out uint status, out _, info.DevInst, 0) == 0 && (status & 8) != 0;
-                found.Add((instance, name, container, started, battery![0]));
+                found.Add((instance, name, container, started, hasBattery ? battery![0] : null));
             }
         }
         finally { SetupDiDestroyDeviceInfoList(set); }
@@ -120,9 +124,12 @@ internal static class BluetoothBatteryReader
                 classOfDevice: evidence?.ClassOfDevice ?? 0);
             return new BatteryDevice($"bluetooth:{f.Id}", f.Name, kind,
                 f.Container is { } c ? live.Contains(c) : f.Started,
-                new(f.Battery, BatteryLevel.Unknown, BatteryCharge.Unknown, false, false), DateTime.UtcNow);
+                f.Battery is { } percent ? new(percent, BatteryLevel.Unknown, BatteryCharge.Unknown, false, false) : null,
+                f.Battery is null ? null : DateTime.UtcNow);
         }).ToList();
     }
+    // AirPods（電池の値を Windows が持たない機器）かどうか。名前は利用者が変えられるので、「AirPods」を含むかだけで見る。
+    public static bool IsAirPods(string name) => name.Contains("AirPods", StringComparison.OrdinalIgnoreCase);
     private static byte[]? Property(nint set, ref DeviceInfo info, PropertyKey key, uint expectedType)
     {
         SetupDiGetDevicePropertyW(set, ref info, in key, out uint type, null, 0, out uint size, 0);

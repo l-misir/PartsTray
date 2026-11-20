@@ -5,7 +5,8 @@ namespace PartsTray.Core;
 public enum BatteryDeviceKind { Other, Mouse, Keyboard, Headphones, Earbuds, Gamepad }
 public enum BatteryCharge { Unknown, Discharging, Charging, SlowCharging, Full, Error }
 [Flags] public enum BatteryLevel : byte { Unknown = 0, Critical = 1, Low = 2, Good = 4, Full = 8 }
-public sealed record BatteryReading(int Percent, BatteryLevel Level, BatteryCharge Charge, bool ExternalPower, bool Approximate);
+// Detail：説明文の 2 行目に出す細かい内訳（AirPods の「左 80%・右 90%・ケース 50%」など）。ない機器は null。
+public sealed record BatteryReading(int Percent, BatteryLevel Level, BatteryCharge Charge, bool ExternalPower, bool Approximate, string? Detail = null);
 public sealed record BatteryDevice(string Id, string Name, BatteryDeviceKind Kind, bool Connected,
     BatteryReading? Reading, DateTime? UpdatedAt);
 
@@ -30,7 +31,8 @@ public static class BatteryMath
 
     public static string BluetoothName(string name)
     {
-        foreach (string suffix in new[] { " Hands-Free AG", " Hands-Free", " Avrcp Transport" })
+        // 「 - Find My」は、Apple の機器が「探す」に対応していることを示す名前の後ろの印（AirPods 4 で確認）。
+        foreach (string suffix in new[] { " Hands-Free AG", " Hands-Free", " Avrcp Transport", " - Find My" })
             if (name.EndsWith(suffix, StringComparison.Ordinal)) return name[..^suffix.Length];
         return name;
     }
@@ -45,6 +47,7 @@ public static class BatteryMath
             BatteryCharge.Full => "（充電完了）", BatteryCharge.Error => "（充電エラー）", _ => ""
         };
         if (device.Reading?.Approximate == true) text += "（概算）";
+        if (device.Reading?.Detail is { Length: > 0 } detail) text += "\n" + detail;
         return text.Length <= 127 ? text : text[..127];
     }
 
