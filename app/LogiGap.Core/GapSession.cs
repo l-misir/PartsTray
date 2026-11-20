@@ -1,3 +1,5 @@
+// MX Master 4 の接続状態と肩代わり・引き継ぎを管理します。
+// 有効条件や送信規則を変える場所です。純粋な状態機械としてテストします。
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 
@@ -91,6 +93,8 @@ public sealed class GapSession : INativeWheelBridge
         paused = !settings.Enabled;
         state = paused ? SessionState.Paused : SessionState.Disconnected;
     }
+    private bool supportedMouseSeen;
+    public bool SupportedMouseSeen { get { lock (gate) return supportedMouseSeen; } }
     public SessionState State { get { lock (gate) return state; } }
     public bool IsPaused { get { lock (gate) return paused; } }
     public int WorkerWaitMilliseconds
@@ -252,6 +256,7 @@ public sealed class GapSession : INativeWheelBridge
 
     private void Begin(byte d, bool existing)
     {
+        supportedMouseSeen = true; // 接続通知・従来の起動識別で確認済み。切断しても記憶する。
         StopBridge("新しい接続");
         RememberSession();
         inheritedActive = previousActive.Contains((receiverIdentity, d));

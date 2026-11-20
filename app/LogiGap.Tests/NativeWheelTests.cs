@@ -7,7 +7,7 @@ namespace LogiGap.Tests;
 public sealed class NativeWheelTests
 {
     private static AppSettings Config(string mode = "hook", decimal speed = 50, int direction = 1, int smoothMs = 0) =>
-        new() { GapFiller = new() { ThumbWheel = new() { Mode = mode, SpeedPercent = speed, DirectionSign = direction, SmoothMs = smoothMs } } };
+        new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = mode, SpeedPercent = speed, DirectionSign = direction, SmoothMs = smoothMs } } };
 
     private static Harness PendingApply()
     {

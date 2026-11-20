@@ -124,7 +124,7 @@ public sealed class OptionsRestartTests
         var h = new Harness { AutoReply = false };
         int calls = 0;
         Func<DateTime?>? provider = throws ? () => { calls++; throw new InvalidOperationException("fake start failure"); } : null;
-        var session = new GapSession(h, h.Input, h.Clock, h.Log, () => true,
+        var session = new GapSession(h, h.Input, h.Clock, h.Log, () => true, new() { GapFiller = new() { Enabled = true } },
             optionsStartedUtc: provider, utcNow: () => h.UtcNow);
         session.Receive([0x10, 2, 0x41, 0x10, 2, 0x42, 0xB0]);
         for (int i = 0; i < 4; i++)

@@ -10,7 +10,7 @@ public sealed class ReviewTests
     [InlineData(true)]
     public void StartupIdentifiesMouseWithoutConnectionNotification(bool shortReplies)
     {
-        var h = new Harness(new() { GapFiller = new() { ThumbWheel = new() { Mode = "divert" } } }) { ShortNameReplies = shortReplies };
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "divert" } } }) { ShortNameReplies = shortReplies };
         h.Names[2] = "MX Master 4"; h.NameFeatures[2] = 7;
         h.Session.ProbeExisting(); h.Session.Pump();
         Assert.Equal(SessionState.Active, h.Session.State);
@@ -24,7 +24,7 @@ public sealed class ReviewTests
     [Fact]
     public void KeyboardGetsOnlyPingAndNameReadsThenScanContinues()
     {
-        var h = new Harness(new() { GapFiller = new() { ThumbWheel = new() { Mode = "divert" } } }); h.Names[3] = "MX Keys S"; h.NameFeatures[3] = 9;
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "divert" } } }); h.Names[3] = "MX Keys S"; h.NameFeatures[3] = 9;
         h.Names[4] = "MX Master 4";
         h.Session.ProbeExisting(); h.Session.Pump();
         var keyboard = h.Sent.Where(r => r[1] == 3).ToArray();
@@ -49,7 +49,7 @@ public sealed class ReviewTests
     [Fact]
     public void PingTimeoutAdvancesToNextSlotWithoutUnsolicitedTraffic()
     {
-        var h = new Harness(new() { GapFiller = new() { ThumbWheel = new() { Mode = "divert" } } }); h.Names[2] = "MX Master 4";
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "divert" } } }); h.Names[2] = "MX Master 4";
         h.Intercept = r => r[1] == 1;
         h.Session.ProbeExisting(); h.Session.Pump();
         for (int i = 0; i < 4; i++) h.Advance(1);
@@ -95,7 +95,7 @@ public sealed class ReviewTests
     [Fact]
     public void OptionsProcessIsReadAtDecisionOnEachConnection()
     {
-        var h = new Harness(new() { GapFiller = new() { ThumbWheel = new() { Mode = "divert" } } }) { OptionsRunning = false }; h.Cids[0x52] = 1;
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "divert" } } }) { OptionsRunning = false }; h.Cids[0x52] = 1;
         h.Intercept = r => { if (r[2] == 13 && r[3] == 0x25) h.OptionsRunning = true; return false; };
         h.Activate(); Assert.Equal(SessionState.Retreated, h.Session.State); Assert.Empty(h.Writes);
         h.Intercept = null; h.OptionsRunning = false; h.Link(); h.Session.Pump();
@@ -107,7 +107,7 @@ public sealed class ReviewTests
     [InlineData(true)]
     public void PreviousActiveSessionResumesOwnDiversion(bool receiverRemoved)
     {
-        var h = new Harness(new() { GapFiller = new() { ThumbWheel = new() { Mode = "divert" } } }); h.Session.ReceiverOpened("receiver-A"); h.Activate();
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "divert" } } }); h.Session.ReceiverOpened("receiver-A"); h.Activate();
         if (receiverRemoved) { h.Session.ReceiverLost(); h.Session.ReceiverOpened("receiver-A"); }
         else h.Session.Receive([0x10, 2, 0x41, 0x10, 0x42, 0x42, 0xB0]);
         h.Sent.Clear(); h.Link(); h.Session.Pump();

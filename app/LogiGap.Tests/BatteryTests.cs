@@ -7,6 +7,38 @@ namespace LogiGap.Tests;
 
 public sealed class BatteryTests
 {
+    [Fact]
+    public void BatteryStartupIdentifiesSupportedMouseWithoutAdditionalRequests()
+    {
+        var h = new Rig();
+        var gap = new Harness(new AppSettings());
+        gap.Session.ReceiverOpened("test"); gap.Session.ProbeExisting(); gap.Session.Pump();
+        h.Tracker.ReceiverOpened("test");
+        h.Reply(4, 5, 0x7A); // 既存の電池 ping。接続通知を使わず識別する。
+        for (int i = 0; i < 5; i++) h.Error(); // 空き番号 2〜6 の ping を終えて番号 1 の探索へ。
+        h.Reply(9); h.Reply(3); h.Reply(11);
+        Assert.False(h.Tracker.SupportedMouseSeen);
+        h.Reply(Encoding.UTF8.GetBytes("MX Master 4"));
+        Assert.True(h.Tracker.SupportedMouseSeen);
+        h.Reply(3); h.Reply(85, 8, 0, 0);
+        Assert.Equal(85, h.Tracker.Snapshot.Single(d => d.Name == "MX Master 4").Reading!.Percent);
+        Assert.Empty(gap.Sent); Assert.Empty(gap.Input.KeyEvents); Assert.Empty(gap.Input.WheelEvents);
+        Assert.Equal(7, h.Sent.Count(r => r[1] == 1)); // ping + 従来の 6 照会だけ。
+        Assert.All(h.Sent, h.Tracker.ValidateRequest);
+        h.Tracker.ReceiverLost(); Assert.True(h.Tracker.SupportedMouseSeen);
+    }
+
+    [Theory]
+    [InlineData("MX Master 4", true)] [InlineData("MX Master 4S", false)]
+    [InlineData("mx master 4", false)] [InlineData("MX Keys S", false)]
+    public void BatteryStartupUsesExactSupportedName(string name, bool expected)
+    {
+        var h = new Rig(); h.Tracker.ReceiverOpened(); h.Reply(4, 5, 0x7A);
+        for (int i = 0; i < 5; i++) h.Error();
+        h.Reply(9); h.Reply(3); h.Reply((byte)Encoding.UTF8.GetByteCount(name)); h.Reply(Encoding.UTF8.GetBytes(name));
+        Assert.Equal(expected, h.Tracker.SupportedMouseSeen);
+    }
+
     private sealed class Rig : IReportTransport
     {
         public FakeClock Clock { get; } = new();

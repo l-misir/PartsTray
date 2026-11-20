@@ -1,3 +1,5 @@
+// 起動・設定の再読込・トレイメニューと各モジュールをつなぎます。
+// 起動時の構成や設定画面の開き方を変える場所です。
 using System.Diagnostics;
 using System.Security.Principal;
 using LogiGap.Core;
@@ -65,6 +67,7 @@ internal sealed class TrayContext : ApplicationContext
     private readonly GapModule gap;
     private readonly GestureModule gestures;
     private readonly MonitorModule monitor;
+    private readonly TaskbarTheme theme;
     private readonly BatteryModule battery;
     private readonly TrayOrder trayOrder;
     private readonly List<IFeatureModule> modules;
@@ -74,6 +77,8 @@ internal sealed class TrayContext : ApplicationContext
     private readonly RegisteredWaitHandle showWait;
     private DateTime configStamp;
     private bool disposing;
+    private SettingsWindow? settingsWindow;
+    private bool openingSettings;
 
     public TrayContext(ILog log, EventWaitHandle show)
     {
@@ -89,10 +94,11 @@ internal sealed class TrayContext : ApplicationContext
         trayOrder = new(log);
         trayOrder.Register(icon, 1);   // 温度・メモリ（オウムの右）
         trayOrder.Want(icon, true);
-        monitor = new(settings, log, icon, menu, trayOrder);
-        battery = new BatteryModule(settings, log, gap, menu, Post, trayOrder);
+        theme = new(settings.Monitor.TaskbarTheme);
+        monitor = new(settings, log, icon, menu, trayOrder, theme);
+        battery = new BatteryModule(settings, log, gap, menu, Post, trayOrder, theme);
         modules = [gap, gestures, monitor, battery];
-        clickTimer.Tick += (_, _) => { clickTimer.Stop(); Open(configPath); };
+        clickTimer.Tick += (_, _) => { clickTimer.Stop(); OpenSettings(); };
         icon.MouseDoubleClick += (_, _) => { doubleClickAt = Environment.TickCount64; clickTimer.Stop(); };
         icon.MouseClick += (_, e) =>
         {
@@ -100,6 +106,7 @@ internal sealed class TrayContext : ApplicationContext
             else if (e.Button == MouseButtons.Middle) gestures.TogglePause();
         };
         menu.Items.Add(status);
+        menu.Items.Add("設定…", null, (_, _) => OpenSettings());
         foreach (var module in modules) menu.Items.AddRange(module.CreateMenuItems().ToArray());
         menu.Items.Add("設定ファイルを開く", null, (_, _) => Open(configPath));
         menu.Items.Add("ログフォルダを開く", null, (_, _) =>
@@ -110,22 +117,73 @@ internal sealed class TrayContext : ApplicationContext
         menu.Items.Add(autoStart);
         menu.Opening += (_, _) =>
         {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            autoStart.Checked = key?.GetValue("LogiGap") is string;
+            try { autoStart.Checked = ReadAutoStart(); }
+            catch (Exception ex) { log.Write($"自動起動の読取失敗: {ex.Message}"); }
         };
         autoStart.Click += (_, _) =>
         {
-            using var key = Registry.CurrentUser.CreateSubKey(RunKey);
-            if (autoStart.Checked) key.DeleteValue("LogiGap", false);
-            else key.SetValue("LogiGap", $"\"{Environment.ProcessPath}\"");
+            try { WriteAutoStart(!ReadAutoStart()); autoStart.Checked = ReadAutoStart(); }
+            catch (Exception ex) { MessageBox.Show("自動起動を変更できませんでした。\n" + ex.Message, "LogiGap", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         };
         menu.Items.Add("終了", null, (_, _) => ExitThread());
         gap.Session.StateChanged += StateChanged;
         gap.Session.SwitchNotice += SwitchNotice;
         StateChanged(gap.Session.State);
         SystemEvents.PowerModeChanged += PowerChanged;
-        showWait = ThreadPool.RegisterWaitForSingleObject(show, (_, _) => Post(() => Open(configPath)), null, Timeout.Infinite, false);
+        showWait = ThreadPool.RegisterWaitForSingleObject(show, (_, _) => Post(OpenSettings), null, Timeout.Infinite, false);
         settingsTimer.Tick += (_, _) => Reload(); settingsTimer.Start();
+    }
+    private static bool ReadAutoStart()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RunKey);
+        return key?.GetValue("LogiGap") is string;
+    }
+    private void WriteAutoStart(bool enabled)
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(RunKey);
+        if (enabled) key.SetValue("LogiGap", $"\"{Environment.ProcessPath}\"");
+        else key.DeleteValue("LogiGap", false);
+        settingsWindow?.RefreshAutoStart();
+    }
+    private void OpenSettings()
+    {
+        if (disposing || openingSettings) return;
+        if (settingsWindow is { IsDisposed: false } existing)
+        {
+            if (existing.WindowState == FormWindowState.Minimized) existing.WindowState = FormWindowState.Normal;
+            existing.Show(); existing.BringToFront(); existing.Activate(); return;
+        }
+        openingSettings = true;
+        try
+        {
+            AppSettings settings;
+            SettingsWindow.FileVersion? version = null;
+            try
+            {
+                var before = SettingsWindow.ReadVersion(configPath);
+                settings = AppSettings.Load(configPath);
+                version = SettingsWindow.ReadVersion(configPath);
+                if (before != null && before != version) throw new IOException("読み込み中に設定ファイルが変更されました。");
+            }
+            catch (Exception ex)
+            {
+                if (SettingsWindow.Ask(null, "設定ファイルを読み込めませんでした。\n" + ex.Message,
+                    ("既定の設定で開く", DialogResult.Yes), ("やめる", DialogResult.Cancel)) != DialogResult.Yes) return;
+                settings = new AppSettings();
+                // 要確認: 読み込みに失敗したときは、保存時に改めて外部変更の確認を行う。
+                version = null;
+            }
+            var window = new SettingsWindow(configPath, settings, version, battery.GetDeviceNames, ReadAutoStart, WriteAutoStart, Open, gap.SupportedMouseSeen, battery.GetDevices);
+            settingsWindow = window;
+            window.FormClosed += (_, _) => { if (ReferenceEquals(settingsWindow, window)) settingsWindow = null; window.Dispose(); };
+            window.Show();
+        }
+        catch (Exception ex)
+        {
+            log.Write($"設定ウィンドウ: {ex}");
+            MessageBox.Show("設定ウィンドウを開けませんでした。\n" + ex.Message, "LogiGap", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally { openingSettings = false; }
     }
     private void Open(string path)
     {
@@ -152,11 +210,13 @@ internal sealed class TrayContext : ApplicationContext
     { if (e.Mode == PowerModes.Resume) gap.ResumeFromSleep(); }
     private void Reload()
     {
+        settingsWindow?.RefreshSupportedMouse(gap.SupportedMouseSeen);
         try
         {
             var stamp = File.Exists(configPath) ? File.GetLastWriteTimeUtc(configPath) : default;
             if (stamp == configStamp) return;
             var settings = AppSettings.Load(configPath);
+            theme.SettingsChanged(settings.Monitor.TaskbarTheme);
             foreach (var module in modules) module.SettingsChanged(settings);
             configStamp = File.GetLastWriteTimeUtc(configPath);
         }
@@ -167,11 +227,12 @@ internal sealed class TrayContext : ApplicationContext
         if (disposingManaged && !disposing)
         {
             disposing = true; settingsTimer.Stop(); settingsTimer.Dispose(); clickTimer.Dispose(); showWait.Unregister(null);
+            settingsWindow?.Dispose(); settingsWindow = null;
             SystemEvents.PowerModeChanged -= PowerChanged;
             gap.Session.StateChanged -= StateChanged;
             gap.Session.SwitchNotice -= SwitchNotice;
             foreach (var module in modules) module.Dispose();
-            trayOrder.Dispose();
+            theme.Dispose(); trayOrder.Dispose();
             icon.Visible = false; icon.Dispose(); menu.Dispose(); dispatcher.Dispose();
         }
         base.Dispose(disposingManaged);

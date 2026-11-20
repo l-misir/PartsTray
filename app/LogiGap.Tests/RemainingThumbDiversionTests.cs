@@ -6,7 +6,7 @@ namespace LogiGap.Tests;
 public sealed class RemainingThumbDiversionTests
 {
     private static Harness Create(string mode = "hook") =>
-        new(new() { GapFiller = new() { ThumbWheel = new() { Mode = mode } } });
+        new(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = mode } } });
 
     [Fact]
     public void HookReadsThenReleasesRemainingDiversionOnce()
@@ -100,7 +100,7 @@ public sealed class RemainingThumbDiversionTests
     [Fact]
     public void HookReleaseDoesNotOwnThumbForLaterCleanup()
     {
-        var config = new AppSettings();
+        var config = new AppSettings { GapFiller = new() { Enabled = true } };
         var h = new Harness(config); h.Thumb = 1;
         h.Activate();
         Assert.Equal(0, h.Thumb);

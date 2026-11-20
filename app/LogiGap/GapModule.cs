@@ -1,3 +1,5 @@
+// 受信機の接続監視と肩代わり・電池追跡のワーカーを管理します。
+// 監視周期やモジュール間の接続を変える場所です。
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using LogiGap.Core;
@@ -45,9 +47,12 @@ internal sealed class GapModule : IFeatureModule
     public event Action<BatteryDevice>? BatteryChanged;
     public IReadOnlyList<BatteryDevice> Batteries => battery.Snapshot;
     public GapSession Session { get; }
+    public bool SupportedMouseSeen => Session.SupportedMouseSeen || battery.SupportedMouseSeen;
+    private bool enabled;
+    private ToolStripMenuItem? pauseItem;
     public GapModule(AppSettings settings, ILog log)
     {
-        this.log = log;
+        this.log = log; enabled = settings.GapFiller.Enabled;
         timer = HighResolutionTimer.Create();
         if (timer == null) LogTimerFailure();
         Session = new(transport, new WindowsInput(), new Clock(), log, OptionsRunning, settings,
@@ -201,13 +206,15 @@ internal sealed class GapModule : IFeatureModule
     }
     public IEnumerable<ToolStripItem> CreateMenuItems()
     {
-        var pause = new ToolStripMenuItem("つなぎ役を一時停止");
-        pause.Click += (_, _) => { Session.SetPaused(!Session.IsPaused); pause.Text = Session.IsPaused ? "つなぎ役を再開" : "つなぎ役を一時停止"; };
+        var pause = pauseItem = new ToolStripMenuItem("つなぎ役を一時停止") { Visible = enabled };
+        pause.Click += (_, _) => { if (!enabled) return; Session.SetPaused(!Session.IsPaused); pause.Text = Session.IsPaused ? "つなぎ役を再開" : "つなぎ役を一時停止"; };
         pause.OwnerChanged += (_, _) => { if (pause.Owner is ContextMenuStrip menu) menu.Opening += (_, _) => pause.Text = Session.IsPaused ? "つなぎ役を再開" : "つなぎ役を一時停止"; };
         yield return pause;
     }
     public void SettingsChanged(AppSettings settings)
     {
+        enabled = settings.GapFiller.Enabled;
+        if (pauseItem != null) pauseItem.Visible = enabled;
         Session.UpdateSettings(settings);
         battery.UpdateSettings(settings.Battery);
     }

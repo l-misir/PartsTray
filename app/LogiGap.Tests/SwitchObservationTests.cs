@@ -100,7 +100,7 @@ public sealed class SwitchObservationTests
 
     [Fact] public void InvalidationRecordsEveryQueuedButtonAndAggregatesThumb()
     {
-        var h = new Harness(new() { GapFiller = new() { ThumbWheel = new() { Mode = "divert" } } }); h.Activate(); h.Sent.Clear();
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "divert" } } }); h.Activate(); h.Sent.Clear();
         h.Buttons(0x53, 0x52); h.Buttons(); h.Buttons(0x53);
         for (int i = 0; i < 3; i++) Thumb(h);
         h.Options(); h.Session.Pump();
@@ -122,7 +122,7 @@ public sealed class SwitchObservationTests
 
     [Fact] public void ExecutedActionsAndEmptyQueuesHaveNoDiscardLogs()
     {
-        var h = new Harness(new() { GapFiller = new() { ThumbWheel = new() { Mode = "divert" } } }); h.Activate(); h.Buttons(0x53); Thumb(h); h.Session.Pump();
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "divert" } } }); h.Activate(); h.Buttons(0x53); Thumb(h); h.Session.Pump();
         h.Options(); h.Session.Pump();
         Assert.Single(h.Input.KeyEvents); Assert.Single(h.Input.WheelEvents);
         Assert.DoesNotContain(h.Log.Lines, l => l.Contains("破棄"));
@@ -158,13 +158,13 @@ public sealed class SwitchObservationTests
 
     [Fact] public void ObservationUsesSessionBindingsAndIgnoresUnconfiguredButtons()
     {
-        var config = new AppSettings { GapFiller = new() { Buttons = new()
+        var config = new AppSettings { GapFiller = new() { Enabled = true, Buttons = new()
         {
             ["0x0053"] = new() { Keys = "PrintScreen" },
             ["0x0052"] = new() { Action = "ToggleDpi" }
         } } };
         var h = new Harness(config); h.Activate(); h.Options();
-        h.Session.UpdateSettings(new());
+        h.Session.UpdateSettings(new() { GapFiller = new() { Enabled = true } });
         h.Buttons(0x53, 0x53, 0x56, 0x52); h.Session.Pump();
         Assert.Equal(new[]
         {
@@ -236,7 +236,7 @@ public sealed class SwitchObservationTests
 
     [Fact] public void DisabledSwitchNoticesSuppressBothEventsAndNoticeLogs()
     {
-        var h = new Harness(new() { GapFiller = new() { NotifyOnSwitch = false } });
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, NotifyOnSwitch = false } });
         var notices = new List<string>(); h.Session.SwitchNotice += notices.Add;
         h.Activate(); Assert.Equal(SessionState.Active, h.Session.State);
         h.Options(); Assert.Equal(SessionState.Retreated, h.Session.State);
@@ -246,11 +246,11 @@ public sealed class SwitchObservationTests
     [Theory] [InlineData(true, false)] [InlineData(false, true)]
     public void UpdatedNotificationSettingAppliesToCurrentSession(bool initial, bool updated)
     {
-        var h = new Harness(new() { GapFiller = new() { NotifyOnSwitch = initial } });
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, NotifyOnSwitch = initial } });
         var notices = new List<string>(); h.Session.SwitchNotice += notices.Add;
         h.Activate();
         Assert.Equal(initial ? 1 : 0, notices.Count);
-        h.Session.UpdateSettings(new() { GapFiller = new() { NotifyOnSwitch = updated } });
+        h.Session.UpdateSettings(new() { GapFiller = new() { Enabled = true, NotifyOnSwitch = updated } });
         h.Options();
         string notice = Assert.Single(notices);
         Assert.StartsWith(updated ? "Options+ に引き継ぎました（肩代わり " : "肩代わりを開始しました（接続から ", notice);

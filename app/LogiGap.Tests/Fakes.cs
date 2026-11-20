@@ -34,7 +34,8 @@ internal sealed class Harness : IReportTransport
     public Dictionary<byte, string> Names { get; } = [];
     public Dictionary<byte, byte> NameFeatures { get; } = [];
     public bool ShortNameReplies { get; set; }
-    public Harness(AppSettings? config = null) => Session = new(this, Input, Clock, Log, () => OptionsRunning, config,
+    // 指示書 N: 本番の既定は無効。肩代わりの既存テストでは有効な利用者設定を明示する。
+    public Harness(AppSettings? config = null) => Session = new(this, Input, Clock, Log, () => OptionsRunning, config ?? new() { GapFiller = new() { Enabled = true } },
         optionsStartedUtc: () => OptionsStartedUtc, utcNow: () => UtcNow);
     public void Send(byte[] report)
     {

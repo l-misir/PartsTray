@@ -7,7 +7,7 @@ public sealed class SessionTests
 {
     [Fact] public void AppliesInRequiredOrderAndReadsThumbStatus()
     {
-        var h = new Harness(new() { GapFiller = new() { ThumbWheel = new() { Mode = "divert" } } }); h.Activate();
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "divert" } } }); h.Activate();
         Assert.Equal(SessionState.Active, h.Session.State);
         Assert.Equal(7, h.Writes.Length);
         Assert.Equal(new byte[] { 0, 8, 0x98 }, h.Writes[0][4..7]);
@@ -73,7 +73,7 @@ public sealed class SessionTests
     }
     [Fact] public void CleanupRestoresUnclaimedThumbAndSkipsAlreadyOffCid()
     {
-        var h = new Harness(new() { GapFiller = new() { ThumbWheel = new() { Mode = "divert" } } }); h.Activate(); h.Options();
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "divert" } } }); h.Activate(); h.Options();
         foreach (var c in GapSession.ButtonOrder) h.Cids[c] = 0;
         h.Sent.Clear(); h.Advance(15);
         var r = Assert.Single(h.Writes); Assert.Equal(19, r[2]); Assert.Equal(new byte[] { 0, 0 }, r[4..6]);
@@ -92,7 +92,7 @@ public sealed class SessionTests
     }
     [Fact] public void TimeoutRetriesThreeTimesThenWaitsForActivity()
     {
-        var h = new Harness(new() { GapFiller = new() { ThumbWheel = new() { Mode = "divert" } } }); h.Intercept = r => r[2] == 20 && r[3] == 0x35; h.Activate();
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "divert" } } }); h.Intercept = r => r[2] == 20 && r[3] == 0x35; h.Activate();
         for (int i = 0; i < 4; i++) h.Advance(1);
         Assert.Equal(4, h.Writes.Length); Assert.Equal(SessionState.Active, h.Session.State);
         h.Advance(100); Assert.Equal(4, h.Writes.Length);
@@ -101,7 +101,7 @@ public sealed class SessionTests
     }
     [Fact] public void BusyRetriesAndError10DoesNotRetryImmediately()
     {
-        var h = new Harness(new() { GapFiller = new() { ThumbWheel = new() { Mode = "divert" } } }); int busy = 0;
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "divert" } } }); int busy = 0;
         h.Intercept = r =>
         {
             if (r[2] != 20 || r[3] != 0x35 || busy++ != 0) return false;
@@ -150,7 +150,7 @@ public sealed class SessionTests
     }
     [Fact] public void ThumbNotificationsAreIgnoredAfterRetreat()
     {
-        var h = new Harness(new() { GapFiller = new() { ThumbWheel = new() { Mode = "divert" } } }); h.Activate();
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "divert" } } }); h.Activate();
         for (int i = 0; i < 12; i++) { h.Session.Receive(Harness.Frame(2, 19, 0, 0, 0, 1, 0, 0, 1, 2)); h.Session.Pump(); }
         Assert.Equal(120, h.Input.WheelEvents.Sum()); h.Options();
         h.Session.Receive(Harness.Frame(2, 19, 0, 0, 0, 1, 0, 0, 1, 2)); h.Session.Pump();

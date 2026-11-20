@@ -12,7 +12,7 @@ public sealed class ReplayTests
     [InlineData("sniff_20261118_230321.log", 1.129, 17.455)]
     public void RealLogReplayAppliesAndRetreatsAtExpectedTimes(string file, double linkTime, double retreatTime)
     {
-        var h = new Harness(new() { GapFiller = new() { ThumbWheel = new() { Mode = "divert" } } }); bool sawLink = false, sawRetreat = false;
+        var h = new Harness(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "divert" } } }); bool sawLink = false, sawRetreat = false;
         bool sawCopy = false, sawPaste = false; int reports = 0;
         foreach (string line in File.ReadLines(Path.Combine(AppContext.BaseDirectory, "Fixtures", file)))
         {

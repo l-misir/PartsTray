@@ -1,3 +1,5 @@
+// JSON 設定の既定値と入力値の検査を定義します。
+// 設定項目を追加するときは既存キーの意味を保ってここを編集します。
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -75,6 +77,7 @@ public sealed record BatterySettings
     public int LowWarn { get; init; } = 20;
     public int LowHot { get; init; } = 10;
     public List<string> Hidden { get; init; } = [];
+    public Dictionary<string, string> Kinds { get; init; } = new(StringComparer.Ordinal);
     public int RefreshMinutes { get; init; } = 10;
     public int BluetoothPollSeconds { get; init; } = 60;
     // 機器の絵の高さ（20 ドットのアイコンでのドット数。ほかの大きさでは同じ割合で伸び縮みする）。
@@ -83,6 +86,8 @@ public sealed record BatterySettings
 
     public void Validate()
     {
+        if (Kinds is null || Kinds.Any(k => string.IsNullOrWhiteSpace(k.Key) || !BatteryKinds.TryParse(k.Value, out _)))
+            throw new InvalidDataException("battery.kinds は機器名と mouse / keyboard / headphones / earbuds / gamepad / other の組です");
         if (Hidden is null) throw new InvalidDataException("battery.hidden が必要です");
         if (PictureHeight is < 8 or > 20)
             throw new InvalidDataException("battery.pictureHeight は 8〜20 です");
@@ -95,7 +100,7 @@ public sealed record BatterySettings
 
 public sealed record GapSettings
 {
-    public bool Enabled { get; init; } = true;
+    public bool Enabled { get; init; } = false;
     public bool NotifyOnSwitch { get; init; } = true;
     public string MouseWpid { get; init; } = "0xB042";
     public int OwnSwid { get; init; } = 5;
@@ -139,6 +144,7 @@ public sealed record DiagnosticsSettings
 
 public sealed record MonitorSettings
 {
+    public string TaskbarTheme { get; init; } = "auto";
     public bool Enabled { get; init; } = true;
     public ParrotSettings Parrot { get; init; } = new();
     public CpuSettings Cpu { get; init; } = new();
@@ -153,6 +159,8 @@ public sealed record MonitorSettings
 
     public void Validate()
     {
+        if (TaskbarTheme is not ("auto" or "dark" or "light"))
+            throw new InvalidDataException("monitor.taskbarTheme は auto / dark / light のどれかです");
         if (Parrot is null) throw new InvalidDataException("monitor.parrot が必要です");
         if (Cpu is null) throw new InvalidDataException("monitor.cpu が必要です");
         if (!MonitorColor.TryParse(Cpu.Color, out _) || Cpu.Color.AsSpan(1).ContainsAnyExcept("0123456789abcdefABCDEF"))

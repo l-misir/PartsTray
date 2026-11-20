@@ -1,3 +1,5 @@
+// 通知アイコンの番号を定義し、生成後の番号を確認します。
+// Windows が記憶する番号の互換性を保つための表です。
 using System.Reflection;
 using LogiGap.Core;
 
@@ -8,20 +10,17 @@ namespace LogiGap;
 // 2: MonitorModule のオウム
 // 3〜8: MonitorModule で非表示のまま作って破棄（旧電池の番号 3・4 も再利用しない）
 // 9: CPU 使用率、10: メモリ（無効な設定でも生成して番号を確保）
-// 11〜16: BatteryModule の電池枠（従来どおり）
+// 11〜22: BatteryModule の電池枠（11〜13 は従来どおり。動的なウィンドウ用アイコンは 23 以降）
 internal static class TrayIds
 {
     public const int Main = 1, Parrot = 2, UnusedFirst = 3, UnusedCount = 6, Cpu = 9, Memory = 10;
-    public const int BatteryFirst = 11, BatteryCount = 6;
+    public const int BatteryFirst = 11, BatteryCount = BatteryLayout.SlotCount;
 
-    public static void Check(object owner, int expected, ILog log)
+    public static void Check(NotifyIcon icon, int expected, ILog log)
     {
         try
         {
             // 要確認: WinForms の通し番号と非公開 _id に依存する。取得不能なら黙って続け、不一致だけ記録する。
-            // 要確認: 電池の変更をコンストラクタ内に限定するため、既存 IconSlot の target も反射で読む。
-            var icon = owner as NotifyIcon ?? owner.GetType().GetField("target", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(owner) as NotifyIcon;
-            if (icon is null) return;
             object? value = typeof(NotifyIcon).GetField("_id", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(icon);
             if (value is null) return;
             long actual = Convert.ToInt64(value, System.Globalization.CultureInfo.InvariantCulture);

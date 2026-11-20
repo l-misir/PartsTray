@@ -129,12 +129,12 @@ public sealed class WheelSpringTests
     [InlineData("spring", 50, 301, "ホイール設定または後片付け時間が不正です")]
     public void InvalidSettingsAreRejected(string mode, int springMs, int speed, string message)
     {
-        var config = new AppSettings { GapFiller = new() { ThumbWheel = new() { SmoothMode = mode, SpringMs = springMs, SpeedPercent = speed } } };
+        var config = new AppSettings { GapFiller = new() { Enabled = true, ThumbWheel = new() { SmoothMode = mode, SpringMs = springMs, SpeedPercent = speed } } };
         Assert.Equal(message, Assert.Throws<InvalidDataException>(config.Validate).Message);
     }
 
     private static Harness SpringSession() =>
-        new(new() { GapFiller = new() { ThumbWheel = new() { Mode = "hook", SpeedPercent = 100, DirectionSign = 1, SmoothMs = 40, SmoothMode = "spring", SpringMs = 50 } } });
+        new(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "hook", SpeedPercent = 100, DirectionSign = 1, SmoothMs = 40, SmoothMode = "spring", SpringMs = 50 } } });
 
     private static void PumpFor(Harness h, int ticks, bool checkWait = false)
     {
