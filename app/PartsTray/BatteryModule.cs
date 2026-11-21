@@ -28,6 +28,8 @@ internal sealed class BatteryModule : IFeatureModule
     private long burstUntil;   // 知らせを受けてから、この時刻（Environment.TickCount64）までは 3 秒ごとに読み直す
     private readonly SonyBatteryPoller sony;
     private readonly System.Windows.Forms.Timer sonyTimer = new();   // Sony のヘッドホンに聞きに行く間隔（Bluetooth の読み直しとは別）   // Sony のヘッドホンに直接聞く（充電の状態も分かる）
+    private readonly AppleDeviceBattery apple;   // USB でつないだ iPhone・iPad（Apple のサービス経由）
+    private readonly PortableDeviceBattery portable;   // USB でつないだ Android など（Windows のファイルのやり取りの仕組み＝WPD）
     private readonly BatteryTrend trend = new();   // 残量の増え方から充電中を推測する（Windows から読む Bluetooth 機器）
     private BatterySettings settings = new();
     private string? statusText;
@@ -35,18 +37,23 @@ internal sealed class BatteryModule : IFeatureModule
     private int polling;
     private volatile bool disposed;
 
-    public BatteryModule(AppSettings settings, ILog log, GapModule gap, ContextMenuStrip menu, Action<Action> post, TrayOrder order, TaskbarTheme theme)
+    public BatteryModule(AppSettings settings, ILog log, GapModule gap, ContextMenuStrip menu, Action<Action> post, TrayOrder order, TaskbarTheme theme, Action<NotifyIcon, SettingsIconKind> bindSettings)
     {
         this.theme = theme; theme.Changed += Render;
         this.log = log; this.gap = gap; this.menu = menu; this.post = post;
         // 番号の表は TrayIds。MonitorModule が 10 まで確保し、電池は 11〜22（従来の 11〜13 を維持）。
         pool = Enumerable.Range(0, TrayIds.BatteryCount).Select(i => new TrayIconSlot<DrawingKey>(menu, order, 2 + i)).ToArray();
-        for (int i = 0; i < pool.Length; i++) TrayIds.Check(pool[i].Target, TrayIds.BatteryFirst + i, log);
+        for (int i = 0; i < pool.Length; i++)
+        { TrayIds.Check(pool[i].Target, TrayIds.BatteryFirst + i, log); bindSettings(pool[i].Target, SettingsIconKind.Battery); }
         bluetoothTimer = new(_ => PollBluetooth(), null, Timeout.Infinite, Timeout.Infinite);
         gap.BatteryChanged += LogitechChanged;
         airPods = new(log);
         airPods.Changed += reading => post(() => AirPodsChanged(reading));
         connections = new(log);
+        apple = new(log);
+        apple.Read += list => post(() => UsbRead("apple:", list));
+        portable = new(log);
+        portable.Read += list => post(() => UsbRead("usb:", list));
         sony = new(log, post);
         sony.Updated += SonyUpdated;
         sonyTimer.Tick += (_, _) => { if (!disposed && this.settings.Enabled && this.settings.Bluetooth && this.settings.SonyDirect) sony.Consider(devices.Values.Where(IsSonyCandidate)); };
@@ -62,9 +69,8 @@ internal sealed class BatteryModule : IFeatureModule
     // UI スレッドから呼ぶ。内部の辞書を公開せず、名前だけの読み取り専用スナップショットを返す。
     // 電池の値が一度も取れていない機器（受信機の空いた番号に付く「Logitech 4」などの仮の名前）は出さない（11/20 実機で混じっていた）。
     public IReadOnlyList<string> GetDeviceNames() => Array.AsReadOnly(devices.Values.Where(d => d.Reading != null).Select(d => d.Name)
-        .Distinct(StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal).ToArray());
-    public IReadOnlyList<BatteryDevice> GetDevices() => Array.AsReadOnly(devices.Values.Where(d => d.Reading != null)
-        .OrderBy(d => d.Name, StringComparer.Ordinal).ThenBy(d => d.Id, StringComparer.Ordinal).ToArray());
+        .Distinct(StringComparer.Ordinal).ToArray());
+    public IReadOnlyList<BatteryDevice> GetDevices() => Array.AsReadOnly(devices.Values.Where(d => d.Reading != null).ToArray());
     // 肩代わりの状態（「肩代わり: 肩代わり中」など。肩代わりを切っているときは空）。TrayContext が UI スレッドで渡す。マウスのアイコンの説明に出す。
     public void SetStatus(string text)
     {
@@ -86,6 +92,8 @@ internal sealed class BatteryModule : IFeatureModule
         Interlocked.Increment(ref generation);
         bluetoothTimer.Change(settings.Enabled && settings.Bluetooth ? 0 : Timeout.Infinite, BluetoothPeriod());
         UpdateAirPodsWatcher();
+        apple.SetEnabled(settings.Enabled && settings.AppleDevices);
+        portable.SetEnabled(settings.Enabled && settings.AndroidDevices);
         Render();
     }
     // AirPods の電波を受け取っている間は、つながっているかを 5 秒ごとに確かめる（ふだんは BluetoothPollSeconds ごと）。
@@ -121,6 +129,17 @@ internal sealed class BatteryModule : IFeatureModule
         if (disposed || !settings.SonyDirect) return;
         foreach (var (id, device) in devices.ToArray())
             if (device.Connected && sony.Latest(id) is { } direct) devices[id] = device with { Reading = direct, UpdatedAt = DateTime.UtcNow };
+        Render();
+    }
+    // USB でつながっている iPhone・iPad（apple:）、Android など（usb:）の一覧。一覧にない機器は切断扱い（スマホ・タブレットは切断中は隠れる）。
+    private void UsbRead(string prefix, IReadOnlyList<BatteryDevice> list)
+    {
+        if (disposed) return;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var device in list) { seen.Add(device.Id); devices[device.Id] = device; }
+        foreach (var (id, value) in devices.ToArray())
+            if (id.StartsWith(prefix, StringComparison.Ordinal) && !seen.Contains(id) && value.Connected)
+                devices[id] = value with { Connected = false, Reading = WithoutGuess(value.Reading) };
         Render();
     }
     private void AirPodsChanged(AirPodsReading value)
@@ -204,6 +223,7 @@ internal sealed class BatteryModule : IFeatureModule
         {
             var slot = pool[i];
             if (assigned[i] is not { } device) { slot.Show(false); slot.Key = null; continue; }
+            slot.Target.Tag = device.Name;
             var r = device.Reading;
             // 輪の色は残量だけで決める：普段は緑、lowWarn 以下はオレンジ、lowHot 以下は赤（BatteryMath.RingColor）。
             // 充電中かどうかは、右下の黄色の稲妻の有無で見せる（11/20 ユーザーの指定）。
@@ -268,7 +288,7 @@ internal sealed class BatteryModule : IFeatureModule
         theme.Changed -= Render;
         gap.BatteryChanged -= LogitechChanged;
         bluetoothTimer.Dispose(); themeTimer.Stop(); themeTimer.Dispose();
-        rainbowTimer.Stop(); rainbowTimer.Dispose(); airPods.Dispose(); connections.Dispose(); sony.Dispose(); sonyTimer.Stop(); sonyTimer.Dispose();
+        rainbowTimer.Stop(); rainbowTimer.Dispose(); airPods.Dispose(); connections.Dispose(); sony.Dispose(); apple.Dispose(); portable.Dispose(); sonyTimer.Stop(); sonyTimer.Dispose();
         foreach (var slot in pool) slot.Dispose();
         ClearRainbowFrames();
     }

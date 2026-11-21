@@ -50,15 +50,15 @@ public static class SettingsText
     public static string ButtonChoice(ButtonSettings? value) => value switch
     {
         null => "None",
-        { Action: "ToggleDpi" } => "ToggleDpi",
-        { Action: "Keys", Keys: "Ctrl+C" or "Ctrl+V" or "PrintScreen" or "Win+Up" } => value.Keys,
+        { Action: "ToggleDpi" or "Maximize" or "NextMaximized" or "PreviousMaximized" } => value.Action,
+        { Action: "Keys", Keys:"Ctrl+C" or "Ctrl+V" or "PrintScreen" or "Win+Up" } => value.Keys,
         _ => throw new InvalidDataException("未対応のボタン設定です。")
     };
 
     public static ButtonSettings? ParseButton(string choice) => choice switch
     {
         "None" => null,
-        "ToggleDpi" => new() { Action = "ToggleDpi" },
+        "ToggleDpi" or "Maximize" or "NextMaximized" or "PreviousMaximized" => new() { Action = choice },
         "Ctrl+C" or "Ctrl+V" or "PrintScreen" or "Win+Up" => new() { Keys = choice },
         _ => throw new InvalidDataException("ボタンの動作を選んでください。")
     };
@@ -73,6 +73,8 @@ public static class SettingsText
         else if (!buttons.TryGetValue(cid, out var old) || ButtonChoice(old) != choice) buttons[cid] = value;
         return original with { Buttons = buttons };
     }
+
+    public static string BackgroundColorText(string? text) => text == "" ? "" : ColorText(text);
 
     public static string ColorText(string? text)
     {
@@ -95,8 +97,9 @@ public static class SettingsText
         // 要確認: 「すべて既定に戻す」も画面にある項目のみ。非表示の値と未知の Modules は保持する。
         var value = original with
         {
+            RunAsAdministrator = edited.RunAsAdministrator,
             GapFiller = editGap ? edited.GapFiller with { MouseWpid = original.GapFiller.MouseWpid, OwnSwid = original.GapFiller.OwnSwid } : original.GapFiller,
-            Gesture = edited.Gesture, TitleBar = edited.TitleBar, Wheel = edited.Wheel,
+            Gesture = edited.Gesture, TitleBar = edited.TitleBar, Wheel = edited.Wheel, WindowKeys = edited.WindowKeys,
             Monitor = edited.Monitor, Diagnostics = edited.Diagnostics, MoveDisabledWindows = edited.MoveDisabledWindows,
             Battery = edited.Battery with { PictureHeight = original.Battery.PictureHeight }
         };

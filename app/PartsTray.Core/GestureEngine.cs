@@ -1,28 +1,10 @@
+// マウス入力からジェスチャー・クリック・ホイールの取り込みを判定します。
+// 入力の優先順位や押下から解放までの状態遷移を変えるときに開きます。
 namespace PartsTray.Core;
-
-public readonly record struct PixelPoint(int X, int Y);
-public enum MouseEventKind { Move, Down, Up, Wheel, HorizontalWheel }
-public enum PointerButton { Left, Right, Middle }
-[Flags] public enum PointerModifiers { None = 0, Shift = 1, Control = 2 }
-public readonly record struct PointerEvent(MouseEventKind Kind, PixelPoint Position,
-    PointerButton Button = PointerButton.Left, int Delta = 0, PointerModifiers Modifiers = 0, nuint ExtraInfo = 0);
-public enum GestureEffectKind { HitTest, Probe, Replay, Command, Focus, MoveWindow, TrailBegin, TrailPoint, TrailShow, TrailEnd, Tooltip, Warning, Flush }
-public readonly record struct GestureEffect(GestureEffectKind Kind, long Token = 0, PointerEvent Input = default,
-    long Window = 0, string? Text = null, bool Valid = false, TimeSpan At = default);
-public readonly record struct HitResult(long Window, bool AllowGesture, string? Command = null);
-public readonly record struct PointerCache(PixelPoint Position, TimeSpan At, bool VerticalScrollBar, long DisabledWindow = 0,
-    PixelPoint WindowOrigin = default);
-public interface IGestureEffects { void Post(GestureEffect effect); }
-public interface IGestureHitTest
-{
-    HitResult HitTest(PointerEvent input, AppSettings settings);
-    PointerCache Probe(PixelPoint point, TimeSpan at);
-}
-public interface IGestureInput { bool Replay(PointerEvent input); }
 
 /// <summary>Single owner (hook message thread). No native calls, waits, drawing, or external callbacks
 /// except the nonblocking effect queue. Worker replies return to that same owner by token.</summary>
-public sealed class GestureEngine(IClock clock, IGestureEffects effects, AppSettings settings)
+public sealed partial class GestureEngine(IClock clock, IGestureEffects effects, AppSettings settings)
 {
     private enum Phase { Pending, Gesture, Consumed, Replaying, Passed, Drag }
     private sealed class Capture(long token, PointerEvent down, TimeSpan at, AppSettings settings)
@@ -36,6 +18,8 @@ public sealed class GestureEngine(IClock clock, IGestureEffects effects, AppSett
         public long Window;
         public StrokeRecognizer Stroke = new(down.Position, settings.Gesture);
         public bool RapidExecuted;
+        public WindowSwitchWheel? RightWheel;
+        public bool WheelReported;
         public PixelPoint Origin;
         public long ParentGesture;
         public string? RapidCommand;
@@ -61,6 +45,7 @@ public sealed class GestureEngine(IClock clock, IGestureEffects effects, AppSett
         foreach (var c in buttons)
         {
             if (c == null) continue;
+            c.RightWheel?.Stop();
             if (c.Phase == Phase.Gesture)
             {
                 if (c.Stroke.HasStroke) c.Phase = Phase.Consumed;
@@ -76,12 +61,14 @@ public sealed class GestureEngine(IClock clock, IGestureEffects effects, AppSett
     public void HookLost()
     {
         // Input during the missing hook has already reached Windows. Never replay it here.
+        foreach (var c in buttons) if (c != null) ReportRightWheel(c);
         Array.Clear(buttons); pending.Clear(); expired.Clear();
         cache = null; tip = false; probePending = false; probeActiveUntil = null;
         Emit(GestureEffectKind.TrailEnd);
     }
     private void DiscardMissedRelease(Capture c)
     {
+        ReportRightWheel(c);
         buttons[(int)c.Down.Button] = null;
         pending.Remove(c.Token);
         if (c.Phase == Phase.Replaying)
@@ -98,6 +85,7 @@ public sealed class GestureEngine(IClock clock, IGestureEffects effects, AppSett
     public void Shutdown()
     {
         SetPaused(true);
+        foreach (var capture in buttons) if (capture != null) ReportRightWheel(capture);
         foreach (var c in buttons)
         {
             if (c == null || c.Phase is not (Phase.Replaying or Phase.Passed)) continue;
@@ -124,6 +112,7 @@ public sealed class GestureEngine(IClock clock, IGestureEffects effects, AppSett
             var c = buttons[(int)e.Button];
             if (c == null) return false;
             buttons[(int)e.Button] = null; c.Up = e;
+            ReportRightWheel(c);
             if (e.Button == PointerButton.Right) Emit(GestureEffectKind.TrailEnd, c);
             if (c.Phase == Phase.Pending) return true;
             if (c.Phase == Phase.Gesture) { FinishGesture(c); return true; }
@@ -158,6 +147,7 @@ public sealed class GestureEngine(IClock clock, IGestureEffects effects, AppSett
         }
         if (e.Kind is MouseEventKind.Wheel or MouseEventKind.HorizontalWheel)
         {
+            if (TakeRightWheel(e)) return true;
             RequestProbe();
             if (settings.Wheel.FocusUnderCursor) Emit(GestureEffectKind.Focus, input: e);
             if (e.Kind == MouseEventKind.Wheel && settings.Wheel.FastScrollOnScrollBar &&
@@ -268,78 +258,5 @@ public sealed class GestureEngine(IClock clock, IGestureEffects effects, AppSett
     {
         foreach (var c in buttons)
             if (c?.Token == token && c.Phase == Phase.Replaying) c.Phase = Phase.Passed;
-    }
-    public void WheelSendFailed()
-    {
-        wheelDisabledUntil = clock.Now + TimeSpan.FromSeconds(60);
-        Emit(GestureEffectKind.Warning, text: "ホイール SendInput 失敗: 高速スクロールの横取りを60秒停止");
-    }
-    public void Tick()
-    {
-        if (probeActiveUntil.HasValue && clock.Now > probeActiveUntil.Value)
-        { probeActiveUntil = null; probePending = false; }
-        if (!paused && probeActiveUntil.HasValue && clock.Now >= nextProbe && (probePending || clock.Now >= refreshProbeAt))
-        {
-            SendProbe();
-        }
-        // Maximum 3 current buttons plus already released decisions; iteration only when pending.
-        if (pending.Count != 0)
-        {
-            expired.Clear();
-            foreach (var c in pending.Values)
-                if (clock.Now - c.At >= TimeSpan.FromSeconds(2)) expired.Add(c);
-            foreach (var c in expired)
-            { Replay(c); Emit(GestureEffectKind.Warning, text: "ボタン判定が2秒未確定: 送り直して解除"); }
-        }
-        var right = buttons[(int)PointerButton.Right];
-        if (right == null || right.Phase is not (Phase.Pending or Phase.Gesture)) return;
-        if (!right.Stroke.HasStroke && clock.Now - right.At >= TimeSpan.FromMilliseconds(right.Settings.Gesture.StartTimeoutMs))
-        { Replay(right); return; }
-        if (right.Phase == Phase.Gesture && right.Stroke.HasStroke && !tip &&
-            clock.Now - stillSince >= TimeSpan.FromMilliseconds(right.Settings.Gesture.TooltipDelayMs))
-        {
-            tip = true; Emit(GestureEffectKind.Tooltip, right, new(MouseEventKind.Move, position), right.Stroke.Description);
-        }
-    }
-    private void RequestProbe()
-    {
-        probeActiveUntil = clock.Now + TimeSpan.FromSeconds(3);
-        if (clock.Now >= nextProbe) SendProbe();
-        else probePending = true;
-    }
-    private void SendProbe()
-    {
-        probePending = false;
-        nextProbe = clock.Now + TimeSpan.FromMilliseconds(30);
-        refreshProbeAt = clock.Now + TimeSpan.FromMilliseconds(50);
-        Emit(GestureEffectKind.Probe, input: new(MouseEventKind.Move, position));
-    }
-}
-
-public sealed class StrokeRecognizer(PixelPoint start, GestureSettings settings)
-{
-    private PixelPoint anchor = start;
-    private char last;
-    private readonly System.Text.StringBuilder strokes = new();
-    private string lookup = "";
-    private readonly int maximum = settings.Gestures.Keys.Select(k => k.Length).DefaultIfEmpty(0).Max();
-    public string Pattern => strokes.ToString();
-    public bool HasStroke => last != '\0';
-    public string? Command => settings.Gestures.GetValueOrDefault(lookup);
-    public bool IsValid => Command != null;
-    public string Description => Pattern.Replace("L", "←").Replace("R", "→").Replace("U", "↑").Replace("D", "↓") + " " +
-        (Command switch { "Back" => "戻る", "Forward" => "進む", "Refresh" => "更新", "Close" => "閉じる", "Minimize" => "最小化", _ => "（未登録）" });
-    public void Move(PixelPoint p)
-    {
-        long dx = (long)p.X - anchor.X, dy = (long)p.Y - anchor.Y;
-        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) < settings.StrokeDistancePx) return;
-        // 要確認: 斜め45度で両軸が同距離の場合は横方向を優先する。
-        char direction = Math.Abs(dx) >= Math.Abs(dy) ? dx < 0 ? 'L' : 'R' : dy < 0 ? 'U' : 'D';
-        anchor = p;
-        if (direction == last) return;
-        last = direction;
-        strokes.Append(direction);
-        // A sequence longer than every binding can never become valid again. Bound hook allocations.
-        if (lookup.Length <= maximum) lookup += direction;
     }
 }

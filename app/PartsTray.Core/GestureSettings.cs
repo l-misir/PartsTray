@@ -1,9 +1,12 @@
+// ジェスチャー・タイトルバー・ホイールの設定と検査を定義します。
+// ジェスチャーの既定値や設定項目を変えるときに開きます。
 namespace PartsTray.Core;
 
 public sealed record GestureSettings
 {
     // 11/20：配った人の PC で、知らないうちにウィンドウの動きが変わらないよう、かざぐるマウス由来の操作は最初は切る（設定画面でオンにできる）。
     public bool Enabled { get; init; } = false;
+    public bool RightWheelSwitch { get; init; } = false;
     public int StrokeDistancePx { get; init; } = 10;
     public int StartTimeoutMs { get; init; } = 1000;
     public int TooltipDelayMs { get; init; } = 1000;

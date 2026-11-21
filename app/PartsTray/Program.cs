@@ -10,24 +10,41 @@ namespace PartsTray;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
         using var log = new FileLog(Path.Combine(AppContext.BaseDirectory, "logs"));
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_, e) => log.Write($"UI エラー: {e.Exception}");
         TaskScheduler.UnobservedTaskException += (_, e) => { log.Write($"非同期エラー: {e.Exception}"); e.SetObserved(); };
+        // 裏のスレッドの例外でアプリが落ちるときは、記録の書き出し（別のスレッド）が間に合わない。その場で別のファイルに書く。
+        // 11/21：夜中に PartsTray が記録を残さずに消えていたため。
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            try { File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "logs", $"fatal_{DateTime.Now:yyyyMMdd}.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} 落ちる原因の例外: {e.ExceptionObject}{Environment.NewLine}"); }
+            catch (Exception) { }
+        };
         try
         {
-            string suffix = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
-            using var show = new EventWaitHandle(false, EventResetMode.AutoReset, $"Local\\PartsTray.Show.{suffix}");
-            using var mutex = new Mutex(true, $"Local\\PartsTray.Instance.{suffix}", out bool first);
-            if (!first) { show.Set(); return; }
+            using var identity = WindowsIdentity.GetCurrent();
+            string suffix = identity.User?.Value ?? throw new InvalidOperationException("ユーザー SID がありません");
+            AdministratorRestart.WaitForParent(args);
+            using var instance = new SingleInstance(suffix);
+            if (!instance.Acquire(AdministratorRestart.IsRestart(args) ? 5000 : 0)) { instance.Show.Set(); return; }
+            string? startupNotice = null;
+            try
+            {
+                string config = Path.Combine(AppContext.BaseDirectory, "config.json");
+                bool elevate = File.Exists(config) && AppSettings.Load(config).RunAsAdministrator;
+                if (elevate && !ProcessElevation.IsAdministrator && !AdministratorRestart.IsRestart(args) &&
+                    AdministratorRestart.TryRestart(instance, log, text => startupNotice = text)) return;
+            }
+            catch (Exception ex) { log.Write($"管理者起動設定の読込失敗: {ex.Message}"); }
             try { Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.AboveNormal; }
             catch (Exception ex) { log.Write($"優先度設定失敗: {ex.Message}"); }
             PowerThrottling.OptOut(log);
-            try { using var context = new TrayContext(log, show); Application.Run(context); }
-            finally { mutex.ReleaseMutex(); }
+            using var context = new TrayContext(log, instance.Show, instance, startupNotice);
+            Application.Run(context);
         }
         catch (Exception ex) { log.Write($"起動/終了エラー: {ex}"); }
     }
@@ -55,11 +72,8 @@ internal static class PowerThrottling
     }
 }
 
-internal sealed class TrayContext : ApplicationContext
+internal sealed partial class TrayContext : ApplicationContext
 {
-    private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    // 自動起動の登録名。11/20 にアプリの名前を LogiGap から PartsTray に変えた（OldRunName は前の名前）。
-    private const string RunName = "PartsTray", OldRunName = "LogiGap";
     private readonly ILog log;
     private readonly string configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
     private readonly NotifyIcon icon;
@@ -71,20 +85,22 @@ internal sealed class TrayContext : ApplicationContext
     private readonly MonitorModule monitor;
     private readonly TaskbarTheme theme;
     private readonly BatteryModule battery;
+    private readonly WindowKeysModule windowKeys;   // 本当の最大化・最大化しているアプリの切り替え
     private readonly TrayOrder trayOrder;
     private readonly List<IFeatureModule> modules;
     private readonly System.Windows.Forms.Timer settingsTimer = new() { Interval = 1000 };
     private readonly System.Windows.Forms.Timer clickTimer = new() { Interval = SystemInformation.DoubleClickTime };
-    private long doubleClickAt = long.MinValue / 2;
+    private SettingsDestination menuDestination = new(), clickDestination = new();
     private readonly RegisteredWaitHandle showWait;
     private DateTime configStamp;
     private bool disposing;
     private SettingsWindow? settingsWindow;
     private bool openingSettings;
 
-    public TrayContext(ILog log, EventWaitHandle show)
+    public TrayContext(ILog log, EventWaitHandle show, SingleInstance instance, string? startupNotice)
     {
-        this.log = log;
+        this.log = log; this.instance = instance;
+        autoStartManager = new(log);
         _ = dispatcher.Handle;
         AppSettings settings;
         bool firstRun = !File.Exists(configPath);   // 設定ファイルがまだない＝初めての起動（Load が既定値で作る）
@@ -98,18 +114,16 @@ internal sealed class TrayContext : ApplicationContext
         trayOrder.Register(icon, 1);   // 温度・メモリ（オウムの右）
         trayOrder.Want(icon, true);
         theme = new(settings.Monitor.TaskbarTheme);
-        monitor = new(settings, log, icon, menu, trayOrder, theme);
-        battery = new BatteryModule(settings, log, gap, menu, Post, trayOrder, theme);
-        modules = [gap, gestures, monitor, battery];
-        clickTimer.Tick += (_, _) => { clickTimer.Stop(); OpenSettings(); };
-        icon.MouseDoubleClick += (_, _) => { doubleClickAt = Environment.TickCount64; clickTimer.Stop(); };
-        icon.MouseClick += (_, e) =>
-        {
-            if (e.Button == MouseButtons.Left && Environment.TickCount64 - doubleClickAt > SystemInformation.DoubleClickTime) clickTimer.Start();
-            else if (e.Button == MouseButtons.Middle) gestures.TogglePause();
-        };
+        monitor = new(settings, log, icon, menu, trayOrder, theme, BindSettingsIcon);
+        battery = new BatteryModule(settings, log, gap, menu, Post, trayOrder, theme, BindSettingsIcon);
+        windowKeys = new(settings, log);
+        gap.Session.ThumbWheelRotated += DeviceThumbWheel;
+        gap.Session.PressedButtonsChanged += DevicePressedButtons;
+        modules = [gap, gestures, monitor, battery, windowKeys];
+        clickTimer.Tick += (_, _) => { clickTimer.Stop(); OpenSettings(clickDestination); };
+        BindSettingsIcon(icon, SettingsIconKind.Temperature);
         menu.Items.Add(status);
-        menu.Items.Add("設定…", null, (_, _) => OpenSettings());
+        menu.Items.Add("設定…", null, (_, _) => OpenSettings(menuDestination));
         foreach (var module in modules) menu.Items.AddRange(module.CreateMenuItems().ToArray());
         menu.Items.Add("設定ファイルを開く", null, (_, _) => Open(configPath));
         menu.Items.Add("ログフォルダを開く", null, (_, _) =>
@@ -132,7 +146,9 @@ internal sealed class TrayContext : ApplicationContext
         gap.Session.StateChanged += StateChanged;
         gap.Session.SwitchNotice += SwitchNotice;
         StateChanged(gap.Session.State);
-        MigrateAutoStart();
+        currentSettings = settings;
+        autoStartManager.Reconcile(settings.RunAsAdministrator);
+        if (startupNotice != null) Post(() => SwitchNotice(startupNotice));
         SystemEvents.PowerModeChanged += PowerChanged;
         showWait = ThreadPool.RegisterWaitForSingleObject(show, (_, _) => Post(OpenSettings), null, Timeout.Infinite, false);
         settingsTimer.Tick += (_, _) => Reload(); settingsTimer.Start();
@@ -154,72 +170,6 @@ internal sealed class TrayContext : ApplicationContext
         };
         timer.Start();
     }
-    private static bool ReadAutoStart()
-    {
-        using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-        return key?.GetValue(RunName) is string;
-    }
-    private void WriteAutoStart(bool enabled)
-    {
-        using var key = Registry.CurrentUser.CreateSubKey(RunKey);
-        if (enabled) key.SetValue(RunName, $"\"{Environment.ProcessPath}\"");
-        else key.DeleteValue(RunName, false);
-        settingsWindow?.RefreshAutoStart();
-    }
-    // 前の名前（LogiGap）で自動起動を登録していた場合だけ、今の exe で登録し直す。
-    // 前の登録を残すと、次のログオンで古い LogiGap.exe も起動してしまうため。
-    private void MigrateAutoStart()
-    {
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
-            if (key?.GetValue(OldRunName) is not string) return;
-            key.DeleteValue(OldRunName, false);
-            if (key.GetValue(RunName) is not string) key.SetValue(RunName, $"\"{Environment.ProcessPath}\"");
-            log.Write($"自動起動の登録を {OldRunName} から {RunName} に引き継ぎました");
-        }
-        catch (Exception ex) { log.Write($"自動起動の引き継ぎ失敗: {ex.Message}"); }
-    }
-    private void OpenSettings()
-    {
-        if (disposing || openingSettings) return;
-        if (settingsWindow is { IsDisposed: false } existing)
-        {
-            if (existing.WindowState == FormWindowState.Minimized) existing.WindowState = FormWindowState.Normal;
-            existing.Show(); existing.BringToFront(); existing.Activate(); return;
-        }
-        openingSettings = true;
-        try
-        {
-            AppSettings settings;
-            SettingsWindow.FileVersion? version = null;
-            try
-            {
-                var before = SettingsWindow.ReadVersion(configPath);
-                settings = AppSettings.Load(configPath);
-                version = SettingsWindow.ReadVersion(configPath);
-                if (before != null && before != version) throw new IOException("読み込み中に設定ファイルが変更されました。");
-            }
-            catch (Exception ex)
-            {
-                if (SettingsWindow.Ask(null, "設定ファイルを読み込めませんでした。\n" + ex.Message,
-                    ("既定の設定で開く", DialogResult.Yes), ("やめる", DialogResult.Cancel)) != DialogResult.Yes) return;
-                settings = new AppSettings();
-                // 要確認: 読み込みに失敗したときは、保存時に改めて外部変更の確認を行う。
-                version = null;
-            }
-            var window = new SettingsWindow(configPath, settings, version, battery.GetDeviceNames, ReadAutoStart, WriteAutoStart, Open, gap.SupportedMouseSeen, battery.GetDevices);
-            settingsWindow = window;
-            window.FormClosed += (_, _) => { if (ReferenceEquals(settingsWindow, window)) settingsWindow = null; window.Dispose(); };
-            window.Show();
-        }
-        catch (Exception ex)
-        {
-            log.Write($"設定ウィンドウ: {ex}");
-            MessageBox.Show("設定ウィンドウを開けませんでした。\n" + ex.Message, "PartsTray", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
-        finally { openingSettings = false; }
-    }
     private void Open(string path)
     {
         try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
@@ -230,6 +180,15 @@ internal sealed class TrayContext : ApplicationContext
         if (disposing || dispatcher.IsDisposed) return;
         try { dispatcher.BeginInvoke(action); } catch (InvalidOperationException) { }
     }
+    private void DevicePressedButtons(IReadOnlyList<ushort> buttons) => Post(() =>
+    {
+        if (!disposing) windowKeys.ReceivePressedButtons(buttons);
+    });
+    private void DeviceThumbWheel(short rotation) => Post(() =>
+    {
+        if (!disposing && !windowKeys.ReceiveDeviceRotation(rotation)) gestures.ReceiveDeviceRotation(rotation);
+    });
+
     private void SwitchNotice(string text) => Post(() => icon.ShowBalloonTip(3000, "PartsTray", text, ToolTipIcon.Info));
     private void StateChanged(SessionState value) => Post(() =>
     {
@@ -255,6 +214,9 @@ internal sealed class TrayContext : ApplicationContext
             var stamp = File.Exists(configPath) ? File.GetLastWriteTimeUtc(configPath) : default;
             if (stamp == configStamp) return;
             var settings = AppSettings.Load(configPath);
+            if (settings.RunAsAdministrator != currentSettings.RunAsAdministrator)
+                autoStartManager.Reconcile(settings.RunAsAdministrator);
+            currentSettings = settings;
             theme.SettingsChanged(settings.Monitor.TaskbarTheme);
             foreach (var module in modules) module.SettingsChanged(settings);
             StateChanged(gap.Session.State);   // 肩代わりの有効・無効が変わったとき、状態の文の出し分けを直す
@@ -271,6 +233,8 @@ internal sealed class TrayContext : ApplicationContext
             SystemEvents.PowerModeChanged -= PowerChanged;
             gap.Session.StateChanged -= StateChanged;
             gap.Session.SwitchNotice -= SwitchNotice;
+            gap.Session.ThumbWheelRotated -= DeviceThumbWheel;
+            gap.Session.PressedButtonsChanged -= DevicePressedButtons;
             foreach (var module in modules) module.Dispose();
             theme.Dispose(); trayOrder.Dispose();
             icon.Visible = false; icon.Dispose(); menu.Dispose(); dispatcher.Dispose();

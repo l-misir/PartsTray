@@ -23,9 +23,10 @@ internal sealed partial class SettingsWindow
         for (int i = 0; i < GapSession.ButtonOrder.Count; i++)
         {
             string cid = $"0x{GapSession.ButtonOrder[i]:X4}";
-            ChoiceBox(p, names[i], "肩代わり中の動作です。割り当ての変更は次の接続から有効です。",
+            ChoiceBox(p, names[i], "肩代わり中の動作です。割り当ての変更は次の接続から有効です。本当の最大化・切り替えは、「ウィンドウ・ホイール」で決めたキーを送ります。",
                 [("ToggleDpi", "ポインタの速さを切り替える"), ("Ctrl+C", "Ctrl+C（コピー）"), ("Ctrl+V", "Ctrl+V（貼り付け）"),
-                 ("PrintScreen", "PrintScreen"), ("Win+Up", "Win+↑（最大化）"), ("None", "肩代わりしない")],
+                 ("PrintScreen", "PrintScreen"), ("Win+Up", "Win+↑（最大化）"), ("Maximize", "本当の最大化"),
+                 ("NextMaximized", "最大化しているアプリの切り替え"), ("PreviousMaximized", "最大化しているアプリを前へ"), ("None", "肩代わりしない")],
                 s => SettingsText.ButtonChoice(s.GapFiller.Buttons.GetValueOrDefault(cid)),
                 (s, v) => s with { GapFiller = SettingsText.SetButton(s.GapFiller, cid, v) });
         }
@@ -56,6 +57,7 @@ internal sealed partial class SettingsWindow
     private void BuildWindows()
     {
         var p = Page("ウィンドウ・ホイール");
+        BuildWindowKeys(p);   // 本当の最大化・最大化しているアプリの切り替え（SettingsWindow.Keys.cs）
         Check(p, "Shift＋クリックで最前面に固定", "タイトルバーを Shift＋左クリックすると、最前面への固定を切り替えます。", s => s.TitleBar.ShiftClick != "None",
             (s, v) => s with { TitleBar = s.TitleBar with { ShiftClick = v ? "ToggleTopMost" : "None" } });
         Check(p, "Ctrl＋クリックでそのアプリのフォルダを開く", "タイトルバーを Ctrl＋左クリックすると、実行ファイルの場所を表示します。", s => s.TitleBar.CtrlClick != "None",

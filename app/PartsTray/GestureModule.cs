@@ -1,3 +1,5 @@
+// マウスフックと各ワーカーを接続し、ジェスチャー機能の開始・停止を管理します。
+// フックの監視や入力効果の振り分けを変えるときに開きます。
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -6,11 +8,13 @@ using N = PartsTray.GestureNative;
 
 namespace PartsTray;
 
-internal sealed class GestureModule : IFeatureModule, IGestureEffects
+internal sealed partial class GestureModule : IFeatureModule, IGestureEffects
 {
     private sealed class Clock : IClock { public TimeSpan Now => TimeSpan.FromMilliseconds(Environment.TickCount64); }
     private readonly Clock clock = new();
     private readonly ILog log;
+    private readonly MaximizedWindowSwitcher windowSwitcher;
+    private long windowSwitchToken, observedRightPressToken;
     private readonly Action<Action> ui;
     private readonly Action<string> notify;
     private readonly WindowsGestureServices services;
@@ -41,6 +45,7 @@ internal sealed class GestureModule : IFeatureModule, IGestureEffects
     public GestureModule(AppSettings settings, ILog log, Action<Action> ui, Action<string> notify, INativeWheelBridge? wheelBridge = null)
     {
         this.settings = settings; this.log = log; this.ui = ui; this.notify = notify;
+        windowSwitcher = new(log);
         this.wheelBridge = wheelBridge;
         wheelTrace = new(log);
         wheelTrace.SetEnabled(settings.Diagnostics.WheelTrace);
@@ -67,7 +72,7 @@ internal sealed class GestureModule : IFeatureModule, IGestureEffects
         }
         if (e.Kind is GestureEffectKind.HitTest or GestureEffectKind.Probe)
         { decisions.Enqueue(e); decisionWake.Set(); }
-        else if (e.Kind is GestureEffectKind.Command or GestureEffectKind.MoveWindow)
+        else if (e.Kind is GestureEffectKind.Command or GestureEffectKind.MoveWindow or GestureEffectKind.SwitchMaximized)
         { commands.Enqueue((e, Volatile.Read(ref epoch))); commandWake.Set(); }
         else { actions.Enqueue(e); actionWake.Set(); }
     }
@@ -98,7 +103,7 @@ internal sealed class GestureModule : IFeatureModule, IGestureEffects
                     long now = Environment.TickCount64;
                     if (now - Volatile.Read(ref lastRaw) < 500 && now - lastHook >= 2000 && now - lastReinstall >= 2000)
                     {
-                        engine.HookLost(); Interlocked.Increment(ref epoch); Install();
+                        engine.HookLost(); Volatile.Write(ref observedRightPressToken, 0); Interlocked.Increment(ref epoch); Install();
                         Post(new(GestureEffectKind.Warning, Text: "Raw Input 生存監視: フックを付け直した"));
                     }
                     engine.Tick();
@@ -136,7 +141,7 @@ internal sealed class GestureModule : IFeatureModule, IGestureEffects
         long start = Stopwatch.GetTimestamp(); bool suppress = false;
         WheelTraceTaken taken = WheelTraceTaken.None;
         N.MouseHook native = default;
-        bool captured = false;
+        bool captured = false, releasedElsewhere = false;
         try
         {
             lastHook = Environment.TickCount64;
@@ -161,10 +166,15 @@ internal sealed class GestureModule : IFeatureModule, IGestureEffects
                     0x20E => new(MouseEventKind.HorizontalWheel, point, Delta: unchecked((short)(native.Data >> 16))),
                     _ => null
                 };
-                if (e.HasValue) suppress = engine.Handle(e.Value);
+                if (e.HasValue)
+                {
+                    releasedElsewhere = ReleaseRightButtonIfNeeded(e.Value.Kind);
+                    if (!releasedElsewhere) suppress = engine.Handle(e.Value);
+                    Volatile.Write(ref observedRightPressToken, engine.RightPressToken);
+                }
                 if (suppress) taken = WheelTraceTaken.Gesture;
                 // 0x1 = LLMHF_INJECTED, 0x2 = LLMHF_LOWER_IL_INJECTED。ほかのアプリが送った入力には触れない。
-                if (!suppress && message == 0x20E && (native.Flags & 0x3) == 0 &&
+                if (!suppress && !releasedElsewhere && message == 0x20E && (native.Flags & 0x3) == 0 &&
                     wheelBridge?.TryTakeHorizontal(unchecked((short)(native.Data >> 16))) == true)
                 { suppress = true; taken = WheelTraceTaken.Bridge; }
             }
@@ -183,91 +193,6 @@ internal sealed class GestureModule : IFeatureModule, IGestureEffects
             if (duration > Stopwatch.Frequency / 200) Post(new(GestureEffectKind.Warning, Text: "フック処理が5msを超過", At: TimeSpan.FromSeconds((double)duration / Stopwatch.Frequency)));
         }
         return suppress ? 1 : N.CallNextHookEx(hook, code, message, data);
-    }
-    private void Decisions()
-    {
-        while (Volatile.Read(ref workerStop) == 0)
-        {
-            while (decisions.TryDequeue(out var e))
-            {
-                try
-                {
-                    if (!Enabled) { if (e.Kind == GestureEffectKind.HitTest) Reply(() => engine.Resolve(e.Token, default)); continue; }
-                    if (e.Kind == GestureEffectKind.HitTest)
-                    {
-                        if (clock.Now - e.At >= TimeSpan.FromSeconds(2)) continue;
-                        var hit = services.HitTest(e.Input, Volatile.Read(ref settings));
-                        Reply(() => engine.Resolve(e.Token, Enabled ? hit : default));
-                    }
-                    else if (e.Kind == GestureEffectKind.Probe)
-                    {
-                        if (clock.Now - e.At > TimeSpan.FromMilliseconds(100)) continue;
-                        var cache = services.Probe(e.Input.Position, e.At);
-                        Reply(() => engine.SetCache(cache));
-                    }
-                }
-                catch (Exception ex)
-                {
-                    log.Write($"ヒットテスト/UIA: {ex}");
-                    if (e.Kind == GestureEffectKind.HitTest) Reply(() => engine.Resolve(e.Token, default));
-                }
-            }
-            decisionWake.WaitOne(100);
-        }
-    }
-    private void Actions()
-    {
-        while (Volatile.Read(ref workerStop) == 0 || !actions.IsEmpty)
-        {
-            Volatile.Write(ref actionHeartbeat, Environment.TickCount64);
-            while (actions.TryDequeue(out var e))
-            {
-                try
-                {
-                    if (e.Kind == GestureEffectKind.Replay)
-                    {
-                        bool ok = services.Replay(e.Input);
-                        if (!ok && e.Input.Kind == MouseEventKind.Wheel) Reply(engine.WheelSendFailed);
-                        if (e.Input.Kind == MouseEventKind.Down) Reply(() => engine.ReplayCompleted(e.Token));
-                    }
-                    else if (e.Kind == GestureEffectKind.Flush) Reply(() => Volatile.Write(ref hookExit, 1));
-                    else if (e.Kind == GestureEffectKind.Warning) log.Write($"{e.Text} {e.At.TotalMilliseconds:F3}ms");
-                }
-                catch (Exception ex)
-                {
-                    log.Write($"ジェスチャー送信/操作: {ex}");
-                    if (e.Kind == GestureEffectKind.Replay && e.Input.Kind == MouseEventKind.Wheel) Reply(engine.WheelSendFailed);
-                }
-                Volatile.Write(ref actionHeartbeat, Environment.TickCount64);
-            }
-            actionWake.WaitOne(100);
-        }
-    }
-    private void Commands()
-    {
-        while (Volatile.Read(ref workerStop) == 0)
-        {
-            while (commands.TryDequeue(out var work))
-            {
-                try
-                {
-                    var e = work.Effect;
-                    bool Allowed() => Enabled && work.Epoch == Volatile.Read(ref epoch);
-                    if (!Allowed()) continue;
-                    if (e.Kind == GestureEffectKind.Command && e.Text != null)
-                    {
-                        if (e.Text == "MinimizeToTray") ui(() => { if (Allowed()) hidden.Hide(e.Window); });
-                        else services.Execute(e.Window, e.Text, Volatile.Read(ref settings).Gesture, Allowed);
-                    }
-                    else if (e.Kind == GestureEffectKind.MoveWindow && N.IsWindow((nint)e.Window))
-                    {
-                        if (!N.SetWindowPos((nint)e.Window, 0, e.Input.Position.X, e.Input.Position.Y, 0, 0, 0x15 | 0x4000)) log.Write("無効ウィンドウの移動が拒否されました");
-                    }
-                }
-                catch (Exception ex) { log.Write($"ウィンドウ操作: {ex}"); }
-            }
-            commandWake.WaitOne(100);
-        }
     }
     private void CheckKazaguru()
     {
@@ -312,6 +237,7 @@ internal sealed class GestureModule : IFeatureModule, IGestureEffects
     {
         if (Interlocked.Exchange(ref stopping, 1) != 0) return;
         monitor.Stop(); monitor.Dispose(); raw.Dispose();
+        windowSwitcher.Dispose();
         Reply(() => { engine.Shutdown(); Post(new(GestureEffectKind.Flush)); });
         if (!hookThread.Join(TimeSpan.FromSeconds(3))) log.Write("フック終了待ちがタイムアウトしました");
         wheelTrace.Dispose();

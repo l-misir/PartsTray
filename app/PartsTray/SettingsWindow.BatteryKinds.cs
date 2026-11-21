@@ -11,15 +11,21 @@ internal sealed partial class SettingsWindow
         var table = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Top, ColumnCount = 2 };
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        var editors = new Dictionary<string, ComboBox>(StringComparer.Ordinal);
-        string[] values = ["mouse", "keyboard", "headphones", "earbuds", "gamepad", "other"];
+        var editors = batteryKindEditors;
+        string[] values = ["mouse", "keyboard", "headphones", "earbuds", "gamepad", "phone", "tablet", "other"];
         Field(page, "機器の種類", table, "自動判定と違うときは種類を選んでください。同じ名前の機器すべてに適用します。");
-        loaders.Add(s =>
+        BatterySettings loaded = original.Battery;
+        void Populate()
         {
             foreach (Control c in table.Controls.Cast<Control>().ToArray()) c.Dispose();
             table.Controls.Clear(); table.RowStyles.Clear(); table.RowCount = 0; editors.Clear();
+            if (!deviceListReady)
+            {
+                table.Controls.Add(new Label { Text = deviceLoading.Text, AutoSize = true }, 0, 0);
+                return;
+            }
             // 要確認: 同名機器は名前で設定する仕様のため 1 行にまとめ、自動の表示は ID 順の先頭を使う。
-            foreach (var group in batteryDevices().Where(d => d.Reading != null).GroupBy(d => d.Name, StringComparer.Ordinal)
+            foreach (var group in cachedBatteryDevices.Where(d => d.Reading != null).GroupBy(d => d.Name, StringComparer.Ordinal)
                 .OrderBy(g => g.Key, StringComparer.Ordinal))
             {
                 var device = group.OrderBy(d => d.Id, StringComparer.Ordinal).First();
@@ -33,21 +39,25 @@ internal sealed partial class SettingsWindow
                     BatteryKinds.TryParse(value, out var kind);
                     combo.Items.Add(new Choice(value, BatteryKinds.Label(kind)));
                 }
-                string selected = s.Battery.Kinds.GetValueOrDefault(group.Key, "");
+                string selected = loaded.Kinds.GetValueOrDefault(group.Key, "");
                 combo.SelectedIndex = combo.Items.Cast<Choice>().ToList().FindIndex(c => c.Value == selected);
                 table.Controls.Add(combo, 1, row); editors.Add(group.Key, combo);
             }
-        });
-        snapshots.Add(() => editors.Select(e => new[] { e.Key, (e.Value.SelectedItem as Choice)?.Value }).ToArray());
-        readers.Add(s =>
+        }
+        loaders.Add(s => { loaded = s.Battery; Populate(); });
+        refreshBatteryKinds = Populate;
+        Dictionary<string, string> ReadKinds(BatterySettings source)
         {
-            var kinds = new Dictionary<string, string>(s.Battery.Kinds, StringComparer.Ordinal);
+            var kinds = new Dictionary<string, string>(source.Kinds, StringComparer.Ordinal);
             foreach (var (name, combo) in editors)
             {
                 string value = (combo.SelectedItem as Choice)?.Value ?? "";
                 if (value.Length == 0) kinds.Remove(name); else kinds[name] = value;
             }
-            return s with { Battery = s.Battery with { Kinds = kinds } };
-        });
+            return kinds;
+        }
+        // 非同期で自動の行が増えても編集とみなさず、未検出の設定も保持する。
+        snapshots.Add(() => ReadKinds(loaded).OrderBy(k => k.Key, StringComparer.Ordinal).ToArray());
+        readers.Add(s => s with { Battery = s.Battery with { Kinds = ReadKinds(s.Battery) } });
     }
 }

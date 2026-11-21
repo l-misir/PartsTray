@@ -2,8 +2,8 @@
 // 更新間隔や取得の流れを変えるときはここを編集します。
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using PartsTray.Core;
 using Microsoft.Win32.SafeHandles;
+using PartsTray.Core;
 
 namespace PartsTray;
 
@@ -21,7 +21,8 @@ internal sealed partial class MonitorModule : IFeatureModule
     private readonly ILog log;
     private readonly AcpiTemperature acpi = new();
     private long acpiReadAt = -1000;
-    private bool acpiFailureLogged;
+    private readonly AcpiTemperatureHealth temperatureHealth;
+    private CpuTemperature? rawAcpi;
     private Bitmap[]? scaledFrames;              // アイコンの大きさに縮めたコマ（大きさが変わるまで使い回す）
     private (int Size, int Height, bool Stretch, int Widen) scaledKey;
     private MonitorSettings settings = new();
@@ -44,8 +45,9 @@ internal sealed partial class MonitorModule : IFeatureModule
 
     private readonly TrayOrder order;
 
-    public MonitorModule(AppSettings settings, ILog log, NotifyIcon mainIcon, ContextMenuStrip menu, TrayOrder order, TaskbarTheme theme)
+    public MonitorModule(AppSettings settings, ILog log, NotifyIcon mainIcon, ContextMenuStrip menu, TrayOrder order, TaskbarTheme theme, Action<NotifyIcon, SettingsIconKind> bindSettings)
     {
+        temperatureHealth = new(() => elapsed.Elapsed);
         this.theme = theme;
         this.mainIcon = mainIcon; this.log = log; this.order = order;
         parrot = new() { ContextMenuStrip = menu };
@@ -60,6 +62,8 @@ internal sealed partial class MonitorModule : IFeatureModule
         TrayIds.Check(cpuIcon, TrayIds.Cpu, log);
         memoryIcon = new() { ContextMenuStrip = menu };
         TrayIds.Check(memoryIcon, TrayIds.Memory, log);
+        bindSettings(parrot, SettingsIconKind.Parrot); bindSettings(cpuIcon, SettingsIconKind.Cpu);
+        bindSettings(memoryIcon, SettingsIconKind.Memory);
         order.Register(parrot, 0); order.Register(cpuIcon, 1);
         // 既存の rank を維持して本体を登録する（Windows の並びは強制変更しない）。
         order.Register(mainIcon, 2); order.Register(memoryIcon, 3);
@@ -86,6 +90,9 @@ internal sealed partial class MonitorModule : IFeatureModule
     {
         if (disposed) return;
         sampleTimer.Stop(); frameTimer.Stop();
+        if (settings.TempMemory.Source != value.Monitor.TempMemory.Source ||
+            settings.Enabled != value.Monitor.Enabled || settings.TempMemory.Enabled != value.Monitor.TempMemory.Enabled)
+            temperatureHealth.Reset();
         settings = value.Monitor;
         acpiReadAt = elapsed.ElapsedMilliseconds - 1000;   // 読み方が変わってもすぐ読む
         sampleTimer.Interval = settings.SampleIntervalMs;
@@ -113,6 +120,7 @@ internal sealed partial class MonitorModule : IFeatureModule
             if (!TrayInteraction.Busy) { UpdateTooltip(); sampleTimer.Stop(); }
             return;
         }
+        bool validUsage = previousCpu.HasValue;
         if (Native.GetSystemTimes(out ulong idle, out ulong kernel, out ulong user))
         {
             var current = new CpuTimes(idle, kernel, user);
@@ -130,27 +138,24 @@ internal sealed partial class MonitorModule : IFeatureModule
         }
         // 要確認: メモリ API が失敗した周期は、古い値や 0% を出さず -- / 取得不可と表示する。
         else memoryLoad = null;
-        if (!TempEnabled) temperature = null;
-        else if (settings.TempMemory.Source == "coretemp") temperature = ReadTemperature();
-        // ACPI の温度は 1℃ 刻みでゆっくり変わるので、1 秒に 1 回だけ読む（CPU・メモリは sampleIntervalMs ごと）。
-        else if (elapsed.ElapsedMilliseconds - acpiReadAt >= 1000)
-        {
-            acpiReadAt = elapsed.ElapsedMilliseconds;
-            temperature = acpi.Read();
-            if (temperature is null && !acpiFailureLogged) { acpiFailureLogged = true; log.Write("CPU 温度: ACPI の温度を読めません（Thermal Zone Information）"); }
-        }
+        SampleTemperature(validUsage && previousCpu.HasValue ? cpu : null);
         ReadTheme();
         if (TrayInteraction.Busy) return;
+        if (temperatureHealth.TakeNotice())
+        {
+            log.Write(AcpiTemperatureHealth.UnavailableMessage);
+            mainIcon.ShowBalloonTip(5000, "CPU 温度", AcpiTemperatureHealth.UnavailableMessage, ToolTipIcon.Info);
+        }
         UpdateTooltip(); // 初めて表示する前に、新しいアイコンの説明文も設定する。
         if (TempEnabled) DrawTempMemory();
         if (CpuEnabled)
         {
-            DrawBig(cpuSlot, MonitorMath.Round(cpu), ParseColor(settings.Cpu.Color, Palette.Cyan));
+            DrawBig(cpuSlot, MonitorMath.Round(cpu), ParseColor(settings.Cpu.Color, Palette.Cyan, settings.Cpu.BackgroundColor), settings.Cpu.BackgroundColor);
             order.Want(cpuIcon, true);
         }
         if (MemoryEnabled)
         {
-            DrawBig(memorySlot, memoryLoad is { } load ? (int)load : null, ParseColor(settings.TempMemory.MemoryColor, Color.White));
+            DrawBig(memorySlot, memoryLoad is { } load ? (int)load : null, ParseColor(settings.TempMemory.MemoryColor, Color.White, settings.TempMemory.MemoryBackgroundColor), settings.TempMemory.MemoryBackgroundColor);
             order.Want(memoryIcon, true);
         }
         if (ParrotEnabled)
@@ -159,29 +164,6 @@ internal sealed partial class MonitorModule : IFeatureModule
             DrawParrot();
             order.Want(parrot, true);
         }
-    }
-
-    private static CpuTemperature? ReadTemperature()
-    {
-        // 要確認: 終了した Core Temp のマッピングを保持し続けないよう、各サンプルで開き直し、その場で閉じる。
-        using var local = Native.OpenFileMapping(4, false, "CoreTempMappingObjectEx");
-        if (!local.IsInvalid) return ReadMapping(local);
-        using var global = Native.OpenFileMapping(4, false, @"Global\CoreTempMappingObjectEx");
-        return global.IsInvalid ? null : ReadMapping(global);
-    }
-
-    private static CpuTemperature? ReadMapping(SafeFileHandle mapping)
-    {
-        // 必要な先頭部分だけをマップし、電力などの拡張フィールドは読まない。
-        nint view = Native.MapViewOfFile(mapping, 4, 0, 0, 2688);
-        if (view == 0) return null;
-        try
-        {
-            byte[] bytes = new byte[2688];
-            Marshal.Copy(view, bytes, 0, bytes.Length);
-            return MonitorMath.ReadCoreTemp(bytes);
-        }
-        finally { Native.UnmapViewOfFile(view); }
     }
 
     private void ThemeChanged()
@@ -227,7 +209,7 @@ internal sealed partial class MonitorModule : IFeatureModule
             bool coreTemp = settings.TempMemory.Source == "coretemp";
             text = temperature is { } t
                 ? coreTemp ? $"CPU {MonitorMath.Round(t.Average)}℃（最高 {MonitorMath.Round(t.Maximum)}℃）" : $"CPU {MonitorMath.Round(t.Average)}℃（ACPI）"
-                : coreTemp ? "CPU 温度なし（Core Temp の共有メモリが見つからない）" : "CPU 温度なし（ACPI の温度が読めない）";
+                : coreTemp ? "CPU 温度なし（Core Temp の共有メモリが見つからない）" : AcpiTemperatureHealth.UnavailableMessage;
             if (!settings.TempMemory.Split) text += "・" + memoryText;
         }
         SetTooltip(mainIcon, text);
@@ -256,7 +238,7 @@ internal sealed partial class MonitorModule : IFeatureModule
     }
 
     // NotifyIcon が参照を切り替えた後でのみ、所有している HICON を解放する。
-    private sealed record BigDrawingKey(int? Value, int Size, string Style, int Color);
+    private sealed record BigDrawingKey(int? Value, int Size, string Style, int Color, string Background);
 
     private static class Native
     {

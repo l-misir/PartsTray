@@ -36,9 +36,13 @@ public static class Palette
     // 明るいタスクバーで白・灰色の代わりに使う色（Windows の明るいテーマの記号と同じく、ほぼ黒）。
     public static readonly Color LightForeground = Color.FromArgb(26, 26, 26);
 
-    public static Color ForTaskbar(Color color, bool light)
+    public static Color ForTaskbar(Color color, bool light) => ForBackground(color, Background(light), light);
+
+    public static Color ForBackground(Color color, Color background) =>
+        ForBackground(color, background, Contrast(Color.Black, background) >= Contrast(Color.White, background));
+
+    private static Color ForBackground(Color color, Color background, bool light)
     {
-        Color background = Background(light);
         if (Contrast(color, background) >= 3) return color;
         // 11/20 Claude：白（機器の絵・メモリの数字など）は、3:1 ぎりぎりの灰色だとくすんで見えるので、ほぼ黒にする。
         // 色の付いたもの（輪・稲妻・CPU の水色など）は、色合いを保ったまま最小限だけ暗くする（下の計算）。

@@ -19,6 +19,8 @@ internal static class DevicePictures
             case BatteryDeviceKind.Headphones: Headphones(g, a, color, brush, clear); break;
             case BatteryDeviceKind.Earbuds: Earbuds(g, a, brush, size); break;
             case BatteryDeviceKind.Gamepad: Gamepad(g, a, brush); break;
+            case BatteryDeviceKind.Phone: Phone(g, a, brush, clear); break;
+            case BatteryDeviceKind.Tablet: Tablet(g, a, brush, clear); break;
             default: Other(g, a, brush); break;
         }
         g.CompositingMode = mode;
@@ -93,6 +95,19 @@ internal static class DevicePictures
         using (var right = Rounded(new RectangleF(a.Right - W * 0.38f, a.Y + H * 0.30f, W * 0.38f, H * 0.62f), W * 0.19f)) g.FillPath(brush, right);
     }
 
+    // 11/21 ユーザー：「P4 の大きさで、P2 みたいに中を抜いて（ホームボタンはなし）」。
+    private static void Phone(Graphics g, RectangleF a, Brush brush, Brush clear)
+    {
+        float w = a.Width * 0.52f;
+        using (var body = Rounded(new RectangleF(a.X + (a.Width - w) / 2, a.Y, w, a.Height), w * 0.22f)) g.FillPath(brush, body);
+    }
+    // 11/21 ユーザー：「T1 の大きさで、スマホみたいに中を抜いて」。
+    private static void Tablet(Graphics g, RectangleF a, Brush brush, Brush clear)
+    {
+        float h = a.Height * 0.72f;
+        using (var body = Rounded(new RectangleF(a.X, a.Y + (a.Height - h) / 2, a.Width, h), h * 0.14f)) g.FillPath(brush, body);
+    }
+
     // 右に小さな端子が出た、塗りつぶしの横向き電池。
     private static void Other(Graphics g, RectangleF a, Brush brush)
     {
@@ -107,6 +122,20 @@ internal static class DevicePictures
         if (kind == BatteryDeviceKind.Earbuds) FinishEarbuds(picture);
         else if (kind == BatteryDeviceKind.Gamepad) FinishGamepad(picture);
         else if (kind == BatteryDeviceKind.Keyboard) FinishKeyboard(picture);
+        else if (kind is BatteryDeviceKind.Phone or BatteryDeviceKind.Tablet) FinishScreen(picture);
+    }
+
+    // 縮小・0/1 化した本体に、上下左右 1 ドットの枠だけを残す。
+    private static void FinishScreen(Bitmap picture)
+    {
+        int t = -1, b = -1, l = -1, r = -1, mid = picture.Width / 2;
+        for (int y = 0; y < picture.Height; y++)
+            if (picture.GetPixel(mid, y).A > 0) { if (t < 0) t = y; b = y; }
+        if (t < 0) return;
+        for (int x = 0; x < picture.Width; x++)
+            if (picture.GetPixel(x, (t + b) / 2).A > 0) { if (l < 0) l = x; r = x; }
+        for (int y = t + 1; y < b; y++)
+            for (int x = l + 1; x < r; x++) picture.SetPixel(x, y, Color.Transparent);
     }
 
     // 左右の隙間 2 列は透明、隣の 2 列だけは不透明度を 0/1 にする。

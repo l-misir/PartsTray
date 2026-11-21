@@ -10,7 +10,8 @@ namespace PartsTray;
 // 2: MonitorModule のオウム
 // 3〜8: MonitorModule で非表示のまま作って破棄（旧電池の番号 3・4 も再利用しない）
 // 9: CPU 使用率、10: メモリ（無効な設定でも生成して番号を確保）
-// 11〜22: BatteryModule の電池枠（11〜13 は従来どおり。動的なウィンドウ用アイコンは 23 以降）
+// 11〜24: BatteryModule の電池枠（11〜13 は従来どおり。16 までが種類ごとの固定、17・18 がスマホ・タブレット（11/20 追加）、
+//         19〜24 が同じ種類の 2 台目以降。動的なウィンドウ用アイコンは 25 以降）
 internal static class TrayIds
 {
     public const int Main = 1, Parrot = 2, UnusedFirst = 3, UnusedCount = 6, Cpu = 9, Memory = 10;

@@ -68,6 +68,8 @@ public sealed class SettingsTextTests
     [InlineData("Ctrl+V", "Keys", "Ctrl+V")]
     [InlineData("PrintScreen", "Keys", "PrintScreen")]
     [InlineData("Win+Up", "Keys", "Win+Up")]
+    [InlineData("Maximize", "Maximize", null)]
+    [InlineData("NextMaximized", "NextMaximized", null)]
     [InlineData("None", null, null)]
     public void EveryButtonChoiceConvertsBothWays(string choice, string? action, string? keys)
     {

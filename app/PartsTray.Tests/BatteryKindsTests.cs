@@ -75,9 +75,11 @@ public sealed class BatteryKindsTests
             Device("E gamepad", BatteryDeviceKind.Gamepad), Device("F other", BatteryDeviceKind.Other),
             Device("Z mouse", BatteryDeviceKind.Mouse), Device("H keyboard", BatteryDeviceKind.Keyboard), Device("G other", BatteryDeviceKind.Other) };
         var slots = BatteryLayout.Assign(devices.Reverse(), new());
-        Assert.Equal(12, slots.Length);
+        // 11/20：スマホ（6）・タブレット（7）の固定枠を足して 14 枠。同じ種類の 2 台目以降は 8 から。
+        Assert.Equal(14, slots.Length);
         Assert.Equal(devices.Take(6), slots.Take(6));
-        Assert.Equal(new[] { "G other", "H keyboard", "Z mouse" }, slots.Skip(6).Take(3).Select(d => d!.Name));
+        Assert.Null(slots[6]); Assert.Null(slots[7]);
+        Assert.Equal(new[] { "G other", "H keyboard", "Z mouse" }, slots.Skip(8).Take(3).Select(d => d!.Name));
         Assert.Equal(slots, BatteryLayout.Assign(devices, new()));
     }
 
@@ -107,7 +109,21 @@ public sealed class BatteryKindsTests
     {
         var slots = BatteryLayout.Assign(Enumerable.Range(0, 20).Select(i => Device($"Mouse {i:00}", BatteryDeviceKind.Mouse)), new());
         Assert.Equal(7, slots.Count(d => d != null));
-        Assert.All(slots.Skip(1).Take(5), Assert.Null);
-        Assert.Equal("Mouse 06", slots[11]!.Name);
+        Assert.All(slots.Skip(1).Take(7), Assert.Null);
+        Assert.Equal("Mouse 06", slots[13]!.Name);
+    }
+
+    // 11/20：スマホとタブレットはそれぞれ固定の枠（6・7）。切断中は隠す（ヘッドホンなどと同じ）。
+    [Fact]
+    public void PhoneAndTabletHaveTheirOwnSlotsAndHideWhenDisconnected()
+    {
+        var phone = Device("iPhone", BatteryDeviceKind.Phone) with { Id = "apple:p" };
+        var tablet = Device("iPad", BatteryDeviceKind.Tablet) with { Id = "apple:t" };
+        var slots = BatteryLayout.Assign([phone, tablet], new());
+        Assert.Same(phone, slots[6]); Assert.Same(tablet, slots[7]);
+        Assert.All(BatteryLayout.Assign([phone with { Connected = false }, tablet with { Connected = false }], new()), Assert.Null);
+        Assert.True(BatteryKinds.TryParse("phone", out var k1)); Assert.Equal(BatteryDeviceKind.Phone, k1);
+        Assert.True(BatteryKinds.TryParse("tablet", out var k2)); Assert.Equal(BatteryDeviceKind.Tablet, k2);
+        Assert.Equal("スマホ", BatteryKinds.Label(BatteryDeviceKind.Phone)); Assert.Equal("タブレット", BatteryKinds.Label(BatteryDeviceKind.Tablet));
     }
 }

@@ -13,7 +13,7 @@ public enum SessionState { Disconnected, Active, Retreated, Paused }
 /// The gate linearizes a physical write submission against retreat/disconnect.
 /// No I/O completion is awaited while holding the gate.
 /// </summary>
-public sealed class GapSession : INativeWheelBridge
+public sealed partial class GapSession : INativeWheelBridge
 {
     public static IReadOnlyList<ushort> ButtonOrder { get; } = Array.AsReadOnly<ushort>([0x52, 0x56, 0x53, 0xC3, 0x1A0]);
     private static readonly ushort[] FeatureOrder = [0x2201, 0x1B04, 0x2150, 0x1D4B];
@@ -29,6 +29,7 @@ public sealed class GapSession : INativeWheelBridge
     private DateTime? lastOptionsConfigUtc;
     private GapSettings settings;
     private GapSettings sessionSettings;
+    private WindowKeySettings windowKeys;   // ボタンの「本当の最大化」「切り替え」で送るキー。変更はすぐ反映する
     private SessionState state;
     private byte device;
     private int generation;
@@ -89,6 +90,7 @@ public sealed class GapSession : INativeWheelBridge
         this.utcNow = utcNow ?? (() => DateTime.UtcNow);
         createdUtc = this.utcNow();
         settings = sessionSettings = c.GapFiller;
+        windowKeys = c.WindowKeys;
         smoother = CreateSmoother(settings.ThumbWheel);
         paused = !settings.Enabled;
         state = paused ? SessionState.Paused : SessionState.Disconnected;
@@ -104,7 +106,7 @@ public sealed class GapSession : INativeWheelBridge
             lock (gate)
             {
                 TimeSpan? due = pending?.Deadline;
-                if (!paused && pending == null && ((device == 0 && (probe != null || probes.Count > 0)) || cleanup.Count > 0))
+                if ((!paused || ListenWhilePaused) && pending == null && ((device == 0 && (probe != null || probes.Count > 0)) || cleanup.Count > 0))
                     return 1;
                 if (!paused && state == SessionState.Retreated && !startupCheck && (!cleanupDone || bridgeActive))
                 {
@@ -130,6 +132,10 @@ public sealed class GapSession : INativeWheelBridge
     public event Action<SessionState>? StateChanged;
     // ロック内から呼ぶため、購読側は待たずに UI スレッドへ投函するだけにする。
     public event Action<string>? SwitchNotice;
+    // HID スレッド・gate 内。購読側は待たずに所有スレッドへ投函するだけ。
+    public event Action<short>? ThumbWheelRotated;
+    // 全 CID の読み取り専用スナップショット。肩代わりの所有ボタンには絞らない。
+    public event Action<IReadOnlyList<ushort>>? PressedButtonsChanged;
     public IReadOnlyDictionary<ushort, byte> OptionsFlags { get { lock (gate) return new Dictionary<ushort, byte>(optionsFlags); } }
 
     public void UpdateSettings(AppSettings config)
@@ -138,14 +144,22 @@ public sealed class GapSession : INativeWheelBridge
         lock (gate)
         {
             bool enabledChanged = settings.Enabled != config.GapFiller.Enabled;
+            bool holdChanged = windowKeys.HoldButton != config.WindowKeys.HoldButton;
             settings = config.GapFiller;
+            windowKeys = config.WindowKeys;
             // 要確認: 接続中の HID 設定変更は次の接続へ延期。速度・方向は即時反映する。
             wheel.Reset();
             nativeScaler.Reset();
             smoother = CreateSmoother(settings.ThumbWheel);
             if (enabledChanged) SetPaused(!settings.Enabled);
+            if (paused && holdChanged)
+            {
+                Invalidate();
+                if (ListenWhilePaused && device == 0) ProbeExisting();
+            }
             log.Write("設定再読込: HID 設定は次の接続、ホイール速度・方向は即時反映");
         }
+        Wake?.Invoke();
     }
     private static IWheelSmoother CreateSmoother(ThumbSettings thumb)
     {
@@ -195,7 +209,7 @@ public sealed class GapSession : INativeWheelBridge
     {
         lock (gate)
         {
-            if (paused || device != 0) return;
+            if ((paused && !ListenWhilePaused) || device != 0) return;
             Invalidate(); probe = null;
             probes.Clear();
             for (byte d = 1; d <= 6; d++) probes.Enqueue(d);
@@ -230,10 +244,10 @@ public sealed class GapSession : INativeWheelBridge
                         Change(paused ? SessionState.Paused : SessionState.Disconnected, "マウスのリンク切断/機器変更");
                     }
                 }
-                if (!paused && report.Device == device)
+                if ((!paused || ListenWhilePaused) && report.Device == device)
                 {
                     // Options+ の swid は起動ごとに変わる（0xA・0xB・0xC・0xE を確認）。0（通知）と 5（自分）以外はすべて他のソフトとして扱う。
-                    if (report.Kind == ReportKind.Response && report.Swid != 0 && report.Swid != 5)
+                    if (!paused && report.Kind == ReportKind.Response && report.Swid != 0 && report.Swid != 5)
                     {
                         // Discovery may not yet know the relevant index. Recheck before any write.
                         if (discoveryStep < FeatureOrder.Length && earlyOptions.Count < 256) earlyOptions.Add(report);
@@ -357,12 +371,19 @@ public sealed class GapSession : INativeWheelBridge
                     log.Write($"ボタン CID={cid:X4} 押下: PartsTray は実行しない（{reason}） 設定={action.Action} {action.Keys}");
             }
             heldButtons = now;
+            // 購読側の例外でも、自分が横取りしたボタンの処理を止めない。
+            try { PressedButtonsChanged?.Invoke(Array.AsReadOnly(now.ToArray())); }
+            catch (Exception ex) { log.Write($"ボタン押下一覧の通知に失敗: {ex.Message}"); }
         }
         if (state != SessionState.Active && IsFeature(r, 0x2150) && r.Function == 0 &&
-            r.Parameters.Length >= 6 && !ignoredThumbLogged && BinaryPrimitives.ReadInt16BigEndian(r.Parameters) != 0)
+            r.Parameters.Length >= 6 && BinaryPrimitives.ReadInt16BigEndian(r.Parameters) != 0)
         {
-            ignoredThumbLogged = true;
-            log.Write($"サムホイール回転を検出: PartsTray は送信しない（{reason}）※このリンクでは 1 回だけ記録");
+            ThumbWheelRotated?.Invoke(BinaryPrimitives.ReadInt16BigEndian(r.Parameters));
+            if (!ignoredThumbLogged)
+            {
+                ignoredThumbLogged = true;
+                log.Write($"サムホイール回転を検出: PartsTray は送信しない（{reason}）※このリンクでは 1 回だけ記録");
+            }
         }
     }
     private void ObserveInput(HidReport r)
@@ -458,7 +479,7 @@ public sealed class GapSession : INativeWheelBridge
                 // Bounded for synchronous fake replies; real HID normally stops at the first pending request.
                 for (int n = 0; n < 128; n++)
                 {
-                    if (paused) return;
+                    if (paused && !ListenWhilePaused) return;
                     if (pending is { } p)
                     {
                         if (!p.Command.Allowed() || p.Generation != generation) { pending = null; continue; }
@@ -544,6 +565,7 @@ public sealed class GapSession : INativeWheelBridge
     }
     private Command? NextCommand()
     {
+        if (paused) return ListenWhilePaused ? NextButtonListenerCommand() : null;
         if (device != 0 && (state == SessionState.Active || startupCheck) && !blocked)
         {
             if (discoveryStep < FeatureOrder.Length)
@@ -653,6 +675,19 @@ public sealed class GapSession : INativeWheelBridge
                 dpi = dpi == sessionSettings.Dpi.Primary ? sessionSettings.Dpi.Secondary : sessionSettings.Dpi.Primary;
                 return Write(features[0x2201], 3, DpiBytes(dpi), $"setSensorDpi ボタン {dpi}", _ => { });
             }
+            if (a.Action.Action is "Maximize" or "NextMaximized" or "PreviousMaximized")
+            {
+                // 本当の最大化・切り替えは、設定の windowKeys のキーを送り、WindowKeysModule の登録したキーとして動かす。
+                string keys = a.Action.Action switch
+                {
+                    "Maximize" => windowKeys.Maximize,
+                    "PreviousMaximized" => windowKeys.PreviousMaximized,
+                    _ => windowKeys.NextMaximized
+                };
+                if (string.IsNullOrWhiteSpace(keys)) log.Write("ウィンドウ操作のキーが空のため、何もしません（設定の「ウィンドウ・ホイール」でキーを決めてください）");
+                else input.Keys(keys);
+                continue;
+            }
             input.Keys(a.Action.Keys!);
         }
         if (state == SessionState.Retreated && !startupCheck && !cleanupDone && clock.Now >= retreatAt + TimeSpan.FromSeconds(sessionSettings.CleanupDelaySeconds))
@@ -668,7 +703,7 @@ public sealed class GapSession : INativeWheelBridge
             probe = new(d);
         }
         var candidate = probe;
-        bool Allowed() => !paused && device == 0 && probe == candidate;
+        bool Allowed() => (!paused || ListenWhilePaused) && device == 0 && probe == candidate;
         Command ReadName(byte feature, byte fn, byte[] parameters, string name, Action<HidReport> success) =>
             new(candidate.Device, feature, fn, parameters, name, false, false, Allowed, success);
         if (!candidate.PingConfirmed)

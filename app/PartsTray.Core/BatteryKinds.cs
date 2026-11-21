@@ -10,16 +10,17 @@ public static class BatteryKinds
         {
             "mouse" => BatteryDeviceKind.Mouse, "keyboard" => BatteryDeviceKind.Keyboard,
             "headphones" => BatteryDeviceKind.Headphones, "earbuds" => BatteryDeviceKind.Earbuds,
-            "gamepad" => BatteryDeviceKind.Gamepad, _ => BatteryDeviceKind.Other
+            "gamepad" => BatteryDeviceKind.Gamepad, "phone" => BatteryDeviceKind.Phone, "tablet" => BatteryDeviceKind.Tablet,
+            _ => BatteryDeviceKind.Other
         };
-        return value is "mouse" or "keyboard" or "headphones" or "earbuds" or "gamepad" or "other";
+        return value is "mouse" or "keyboard" or "headphones" or "earbuds" or "gamepad" or "phone" or "tablet" or "other";
     }
 
     public static string Label(BatteryDeviceKind kind) => kind switch
     {
         BatteryDeviceKind.Mouse => "マウス", BatteryDeviceKind.Keyboard => "キーボード",
         BatteryDeviceKind.Headphones => "ヘッドホン", BatteryDeviceKind.Earbuds => "イヤホン",
-        BatteryDeviceKind.Gamepad => "ゲームパッド", _ => "その他"
+        BatteryDeviceKind.Gamepad => "ゲームパッド", BatteryDeviceKind.Phone => "スマホ", BatteryDeviceKind.Tablet => "タブレット", _ => "その他"
     };
 
     public static BatteryDeviceKind? FromHid(IEnumerable<string> compatibleIds)

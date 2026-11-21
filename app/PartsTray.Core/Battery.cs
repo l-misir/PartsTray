@@ -2,7 +2,8 @@
 // 電池の状態やツールチップの文を変える場所です。
 namespace PartsTray.Core;
 
-public enum BatteryDeviceKind { Other, Mouse, Keyboard, Headphones, Earbuds, Gamepad }
+// Phone・Tablet は 11/20 追加（USB でつないだ iPhone・iPad。AppleDeviceBattery.cs）。後ろに足して、今までの値は変えない。
+public enum BatteryDeviceKind { Other, Mouse, Keyboard, Headphones, Earbuds, Gamepad, Phone, Tablet }
 public enum BatteryCharge { Unknown, Discharging, Charging, SlowCharging, Full, Error }
 [Flags] public enum BatteryLevel : byte { Unknown = 0, Critical = 1, Low = 2, Good = 4, Full = 8 }
 // Detail：説明文の 2 行目に出す細かい内訳（AirPods の「左 80%・右 90%・ケース 50%」など）。ない機器は null。

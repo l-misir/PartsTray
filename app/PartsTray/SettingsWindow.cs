@@ -7,9 +7,10 @@ namespace PartsTray;
 
 internal sealed partial class SettingsWindow : Form
 {
+    public event Action? AdministratorEnabled;
     private readonly string configPath;
-    private readonly Func<IReadOnlyList<string>> deviceNames;
-    private readonly Func<IReadOnlyList<BatteryDevice>> batteryDevices;
+    private readonly Func<IReadOnlyList<string>> readDeviceNames;
+    private readonly Func<IReadOnlyList<BatteryDevice>> readBatteryDevices;
     private readonly Func<bool> readAutoStart;
     private readonly Action<bool> writeAutoStart;
     private readonly Action<string> openPath;
@@ -36,12 +37,12 @@ internal sealed partial class SettingsWindow : Form
     }
 
     public SettingsWindow(string configPath, AppSettings settings, FileVersion? version,
-        Func<IReadOnlyList<string>> deviceNames, Func<bool> readAutoStart, Action<bool> writeAutoStart, Action<string> openPath, bool supportedMouseSeen, Func<IReadOnlyList<BatteryDevice>> batteryDevices)
+        Func<IReadOnlyList<string>> deviceNames, Func<bool> readAutoStart, Action<bool> writeAutoStart, Action<string> openPath, bool supportedMouseSeen, Func<IReadOnlyList<BatteryDevice>> batteryDevices, ILog log)
     {
-        this.batteryDevices = batteryDevices;
+        this.readBatteryDevices = batteryDevices; this.settingsLog = log;
         this.supportedMouseSeen = supportedMouseSeen;
         this.configPath = configPath; original = settings; fileVersion = version;
-        this.deviceNames = deviceNames; this.readAutoStart = readAutoStart;
+        this.readDeviceNames = deviceNames; this.readAutoStart = readAutoStart;
         this.writeAutoStart = writeAutoStart; this.openPath = openPath;
         Text = "PartsTray の設定"; ShowInTaskbar = true; Icon = AppIcon.Window;
         Font = new Font("Yu Gothic UI", 9); AutoScaleDimensions = new SizeF(96, 96); AutoScaleMode = AutoScaleMode.Dpi;
@@ -65,7 +66,8 @@ internal sealed partial class SettingsWindow : Form
         BuildGesture(); BuildWindows(); BuildIcons(); BuildOther();
         RefreshSupportedMouse(supportedMouseSeen);
         LoadControls(settings); baseline = Snapshot();
-        Activated += (_, _) => RefreshAutoStart();
+        Shown += (_, _) => BeginInvoke(() => StartDeferredLoading());
+        Activated += (_, _) => { if (deferredStarted) RefreshAutoStart(); };
         FormClosing += (_, e) =>
         {
             gestureGrid.EndEdit();
@@ -105,10 +107,12 @@ internal sealed partial class SettingsWindow : Form
             // 読み取り失敗時は上書きを行わず、エラーを表示する。
             if (ReadVersion(configPath) != fileVersion && Ask(this, "ほかで変更されています。上書きしますか？",
                 ("上書きする", DialogResult.Yes), ("キャンセル", DialogResult.Cancel)) != DialogResult.Yes) return false;
+            bool administratorEnabled = !original.RunAsAdministrator && value.RunAsAdministrator;
             AppSettings.Save(configPath, value);
             fileVersion = ReadVersion(configPath); original = value;
             RefreshSupportedMouse(supportedMouseSeen);
             LoadControls(value); baseline = Snapshot();
+            if (administratorEnabled) AdministratorEnabled?.Invoke();
             return true; // 既存の 1 秒周期の Reload に任せる。
         }
         catch (Exception ex)
@@ -136,6 +140,7 @@ internal sealed partial class SettingsWindow : Form
         var help = new Label { Text = hint, AutoSize = true, ForeColor = SystemColors.GrayText, Font = hintFont, Dock = DockStyle.Top };
         if (label != null) group.Controls.Add(label);
         group.Controls.Add(editor); group.Controls.Add(help);
+        navigationFields[title ?? (editor as CheckBox)?.Text ?? ""] = editor;
         // 狭い幅では説明を折り返し、高さを自動計算する。
         group.SizeChanged += (_, _) =>
         {
@@ -221,30 +226,6 @@ internal sealed partial class SettingsWindow : Form
             set, () => control.SelectedIndex);
         return control;
     }
-    private void ColorField(TableLayoutPanel page, string title, string hint, Func<AppSettings, string> get, Func<AppSettings, string, AppSettings> set)
-    {
-        var row = Flow(); var text = new TextBox { Width = 100, CharacterCasing = CharacterCasing.Upper };
-        var swatch = Button("色を選ぶ", () =>
-        {
-            using var dialog = new ColorDialog { FullOpen = true };
-            if (MonitorColor.TryParse(text.Text, out var c)) dialog.Color = Color.FromArgb(c.R, c.G, c.B);
-            if (dialog.ShowDialog(this) == DialogResult.OK)
-                text.Text = $"#{dialog.Color.R:X2}{dialog.Color.G:X2}{dialog.Color.B:X2}";
-        });
-        text.TextChanged += (_, _) =>
-        {
-            try
-            {
-                string color = SettingsText.ColorText(text.Text);
-                swatch.BackColor = ColorTranslator.FromHtml(color);
-                swatch.ForeColor = swatch.BackColor.GetBrightness() < 0.5f ? Color.White : Color.Black;
-                text.BackColor = SystemColors.Window;
-            }
-            catch (InvalidDataException) { text.BackColor = Color.MistyRose; }
-        };
-        row.Controls.AddRange([swatch, text]); Field(page, title, row, hint);
-        Bind(text, get, v => text.Text = v, () => SettingsText.ColorText(text.Text), set, () => text.Text);
-    }
     private void Processes(TableLayoutPanel page, string title, string hint, Func<AppSettings, string[]> get, Func<AppSettings, string[], AppSettings> set)
     {
         var text = new TextBox { Multiline = true, AcceptsReturn = true, ScrollBars = ScrollBars.Vertical, Height = 80, Dock = DockStyle.Top };
@@ -272,14 +253,6 @@ internal sealed partial class SettingsWindow : Form
         return dialog.ShowDialog(owner);
     }
 
-    public void RefreshAutoStart()
-    {
-        if (IsDisposed || autoStart == null) return;
-        refreshingAutoStart = true;
-        try { autoStart.Checked = readAutoStart(); autoStart.Enabled = true; }
-        catch (Exception) { autoStart.Enabled = false; }
-        finally { refreshingAutoStart = false; }
-    }
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);

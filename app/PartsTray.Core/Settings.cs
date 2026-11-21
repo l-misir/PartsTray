@@ -7,6 +7,7 @@ namespace PartsTray.Core;
 
 public sealed record AppSettings
 {
+    public bool RunAsAdministrator { get; init; } = false;
     public GapSettings GapFiller { get; init; } = new();
     public GestureSettings Gesture { get; init; } = new();
     public TitleBarSettings TitleBar { get; init; } = new();
@@ -14,6 +15,7 @@ public sealed record AppSettings
     public DiagnosticsSettings Diagnostics { get; init; } = new();
     public MonitorSettings Monitor { get; init; } = new();
     public BatterySettings Battery { get; init; } = new();
+    public WindowKeySettings WindowKeys { get; init; } = new();
     public bool MoveDisabledWindows { get; init; } = false;   // 11/20：配った人向けに最初は切る（GestureSettings.cs と同じ理由）
     [JsonExtensionData] public Dictionary<string, JsonElement>? Modules { get; init; }
     public static readonly JsonSerializerOptions JsonOptions = new()
@@ -34,6 +36,8 @@ public sealed record AppSettings
     }
     public void Validate()
     {
+        if (WindowKeys is null) throw new InvalidDataException("windowKeys が必要です");
+        WindowKeys.Validate();
         if (Battery is null) throw new InvalidDataException("battery が必要です");
         Battery.Validate();
         if (Monitor is null) throw new InvalidDataException("monitor が必要です");
@@ -61,12 +65,46 @@ public sealed record AppSettings
         foreach (var (cid, action) in g.Buttons)
         {
             if (!GapSession.ButtonOrder.Any(c => $"0x{c:X4}" == cid) || action is null ||
-                (action.Action != "ToggleDpi" && (action.Action != "Keys" ||
+                (action.Action is not ("ToggleDpi" or "Maximize" or "NextMaximized" or "PreviousMaximized") && (action.Action != "Keys" ||
                 action.Keys is not ("Ctrl+C" or "Ctrl+V" or "PrintScreen" or "Win+Up"))))
                 throw new InvalidDataException($"未対応のボタン設定: {cid}");
         }
     }
     private static bool ValidDpi(int dpi) => dpi is >= 200 and <= 8000 && dpi % 50 == 0;
+}
+
+// ウィンドウ操作のキー（11/20 追加）。空なら使わない。例："Ctrl+Alt+Shift+F10"。WindowKeysModule.cs が登録する。
+// マウスのボタンに割り当てて使う前提（ユーザー：「マウス用なので、キーボードで押しやすいかはどうでもいい」）。
+public sealed record WindowKeySettings
+{
+    // 前面のウィンドウを本当の最大化にする（最大化していれば元に戻す）。Windows＋↑ はスナップの操作なので、状態によって上半分になる。
+    public string Maximize { get; init; } = "";
+    // 同じモニターで最大化しているウィンドウを、重なっている順（最小化していったときに出てくる順）に切り替える。
+    public string NextMaximized { get; init; } = "";
+    public string PreviousMaximized { get; init; } = "";
+    public int WheelSwitchMs { get; init; } = 1500;
+    public int WheelSwitchStep { get; init; } = 120;
+    public bool ReverseHorizontal { get; init; } = false;
+    public bool ThumbWheelFromDevice { get; init; } = true;
+    public string HoldButton { get; init; } = "";
+
+    public void Validate()
+    {
+        if (!WindowHoldButton.TryParse(HoldButton, out _))
+            throw new InvalidDataException("windowKeys.holdButton は空、0x0052、0x00C4、0x00C3、0x01A0、0x0056、0x0053 のいずれかです");
+        var seen = new HashSet<(uint Modifiers, uint Key)>();
+        foreach (string text in new[] { Maximize, NextMaximized, PreviousMaximized })
+        {
+            if (!HotkeyText.TryParse(text, out uint modifiers, out uint key))
+                throw new InvalidDataException("windowKeys は「Ctrl+Alt+Shift+F10」のように、修飾キー（Ctrl・Alt・Shift・Win）とキーを + でつないでください");
+            if (key != 0 && !seen.Add((modifiers, key)))
+                throw new InvalidDataException("windowKeys の 3 つに同じキーは使えません");
+        }
+        if (WheelSwitchMs is < 0 or > 5000)
+            throw new InvalidDataException("windowKeys.wheelSwitchMs は 0〜5000 です");
+        if (WheelSwitchStep is < 1 or > 1200)
+            throw new InvalidDataException("windowKeys.wheelSwitchStep は 1〜1200 です");
+    }
 }
 
 public sealed record BatterySettings
@@ -91,6 +129,10 @@ public sealed record BatterySettings
     public bool AirPods { get; init; } = true;
     // Sony のヘッドホンに数分に一度だけ短くつないで、電池と充電の状態を直接聞く（SonyBatteryPoller.cs）。11/20 追加。
     public bool SonyDirect { get; init; } = true;
+    // USB でつないだ iPhone・iPad の電池を、Apple のサービス経由で読む（AppleDeviceBattery.cs）。11/20 追加。
+    public bool AppleDevices { get; init; } = true;
+    // USB でつないだ Android などの電池を、Windows のファイルのやり取りの仕組み（WPD）から読む（PortableDeviceBattery.cs）。11/20 追加。
+    public bool AndroidDevices { get; init; } = true;
     // Sony のヘッドホンに聞く間隔（秒）。11/20 ユーザー：「2 分は不便。せめて 20 秒、10 秒、なんなら 5 秒」。
     public int SonyPollSeconds { get; init; } = 20;
 
@@ -101,7 +143,7 @@ public sealed record BatterySettings
         if (RainbowLapMs is < 200 or > 10000)
             throw new InvalidDataException("battery.rainbowLapMs は 200〜10000 です");
         if (Kinds is null || Kinds.Any(k => string.IsNullOrWhiteSpace(k.Key) || !BatteryKinds.TryParse(k.Value, out _)))
-            throw new InvalidDataException("battery.kinds は機器名と mouse / keyboard / headphones / earbuds / gamepad / other の組です");
+            throw new InvalidDataException("battery.kinds は機器名と mouse / keyboard / headphones / earbuds / gamepad / phone / tablet / other の組です");
         if (Hidden is null) throw new InvalidDataException("battery.hidden が必要です");
         if (PictureHeight is < 8 or > 20)
             throw new InvalidDataException("battery.pictureHeight は 8〜20 です");
@@ -180,6 +222,9 @@ public sealed record MonitorSettings
         if (!MonitorColor.TryParse(Cpu.Color, out _) || Cpu.Color.AsSpan(1).ContainsAnyExcept("0123456789abcdefABCDEF"))
             throw new InvalidDataException("monitor.cpu.color は #RRGGBB の形です");
         if (TempMemory is null) throw new InvalidDataException("monitor.tempMemory が必要です");
+        SettingsText.BackgroundColorText(Cpu.BackgroundColor);
+        SettingsText.BackgroundColorText(TempMemory.TempBackgroundColor);
+        SettingsText.BackgroundColorText(TempMemory.MemoryBackgroundColor);
         if (SampleIntervalMs is < 100 or > 5000)
             throw new InvalidDataException("monitor.sampleIntervalMs は 100〜5000 です");
         if (DigitStyle is not ("wide" or "thin"))
@@ -218,6 +263,7 @@ public sealed record CpuSettings
 {
     public bool Enabled { get; init; } = true;
     public string Color { get; init; } = "#64D2FF";
+    public string BackgroundColor { get; init; } = "";
 }
 
 // 11/19 ユーザーの指定：CPU 温度は赤、メモリ使用率は白（タスクバーは黒）。しきい値で色を変える作りはやめた。
@@ -231,6 +277,8 @@ public sealed record TempMemorySettings
     public string Source { get; init; } = "acpi";
     public string TempColor { get; init; } = "#FF3B30";
     public string MemoryColor { get; init; } = "#FFFFFF";
+    public string TempBackgroundColor { get; init; } = "";
+    public string MemoryBackgroundColor { get; init; } = "";
 }
 
 public static class MonitorColor

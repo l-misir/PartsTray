@@ -1,3 +1,5 @@
+// ジェスチャー設定のチェック項目と動作一覧を表示・保存します。
+// ジェスチャー設定画面の項目や説明を変えるときに開きます。
 using PartsTray.Core;
 
 namespace PartsTray;
@@ -13,9 +15,11 @@ internal sealed partial class SettingsWindow
         var p = Page("ジェスチャー");
         Check(p, "ジェスチャーを使う", "右ボタンを押して形を描き、離すと登録した動作を実行します。", s => s.Gesture.Enabled,
             (s, v) => s with { Gesture = s.Gesture with { Enabled = v } });
+        Check(p, "右ボタン＋ホイールで切り替える", "右ボタンを押したままホイールを回すと、同じモニターで最大化しているアプリを切り替えます（下・右で次、上・左で前）。ジェスチャーがオンのときだけ働きます。向きと 1 つ進む量は『ウィンドウ・ホイール』の設定を使います。", s => s.Gesture.RightWheelSwitch,
+            (s, v) => s with { Gesture = s.Gesture with { RightWheelSwitch = v } });
         Number(p, "動いたと見なす距離（ピクセル）", "この距離を動かすと、形の向きとして認識します。", 1, 1000, s => s.Gesture.StrokeDistancePx,
             (s, v) => s with { Gesture = s.Gesture with { StrokeDistancePx = (int)v } });
-        Number(p, "始めるまでの待ち時間（ミリ秒）", "右ボタンを押してから、この時間までに動かさなければ普通の右ドラッグになります。", 1, 2000, s => s.Gesture.StartTimeoutMs,
+        Number(p, "始めるまでの待ち時間（ミリ秒）", "右ボタンを押してから、この時間までに動かさなければ普通の右ドラッグになります。右ボタン＋ホイールが有効なときは、ホイールを待つため解放まで押下を保持します。", 1, 2000, s => s.Gesture.StartTimeoutMs,
             (s, v) => s with { Gesture = s.Gesture with { StartTimeoutMs = (int)v } });
         Number(p, "説明を出すまでの時間（ミリ秒）", "ジェスチャー中にこの時間静止すると、形と動作の説明を表示します。", 1, 60000, s => s.Gesture.TooltipDelayMs,
             (s, v) => s with { Gesture = s.Gesture with { TooltipDelayMs = (int)v } });

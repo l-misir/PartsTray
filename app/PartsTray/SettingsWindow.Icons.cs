@@ -35,6 +35,8 @@ internal sealed partial class SettingsWindow
             (s, v) => s with { Monitor = s.Monitor with { Cpu = s.Monitor.Cpu with { Enabled = v } } });
         ColorField(p, "CPU 使用率の色", "独立した CPU 使用率アイコンの数字の色です。", s => s.Monitor.Cpu.Color,
             (s, v) => s with { Monitor = s.Monitor with { Cpu = s.Monitor.Cpu with { Color = v } } });
+        ColorField(p, "CPU 使用率の背景の色", "空欄は透明です。#RRGGBB で指定するか、色を選んでください。", s => s.Monitor.Cpu.BackgroundColor,
+            (s, v) => s with { Monitor = s.Monitor with { Cpu = s.Monitor.Cpu with { BackgroundColor = v } } }, transparent: true);
         Check(p, "温度のアイコンを出す", "オフでは温度を標準のアプリアイコンに戻し、メモリ表示を消します。", s => s.Monitor.TempMemory.Enabled,
             (s, v) => s with { Monitor = s.Monitor with { TempMemory = s.Monitor.TempMemory with { Enabled = v } } });
         Check(p, "温度とメモリを別のアイコンにする", "オフでは温度とメモリを 1 つのアイコンに上下で表示します。", s => s.Monitor.TempMemory.Split,
@@ -44,13 +46,18 @@ internal sealed partial class SettingsWindow
             (s, v) => s with { Monitor = s.Monitor with { TempMemory = s.Monitor.TempMemory with { Source = v } } });
         ColorField(p, "温度の色", "温度の数字の色です。", s => s.Monitor.TempMemory.TempColor,
             (s, v) => s with { Monitor = s.Monitor with { TempMemory = s.Monitor.TempMemory with { TempColor = v } } });
+        ColorField(p, "温度の背景の色", "空欄は透明です。#RRGGBB で指定するか、色を選んでください。", s => s.Monitor.TempMemory.TempBackgroundColor,
+            (s, v) => s with { Monitor = s.Monitor with { TempMemory = s.Monitor.TempMemory with { TempBackgroundColor = v } } }, transparent: true);
         ColorField(p, "メモリの色", "メモリ使用率の数字の色です。", s => s.Monitor.TempMemory.MemoryColor,
             (s, v) => s with { Monitor = s.Monitor with { TempMemory = s.Monitor.TempMemory with { MemoryColor = v } } });
+        ColorField(p, "メモリの背景の色", "空欄は透明です。#RRGGBB で指定するか、色を選んでください。", s => s.Monitor.TempMemory.MemoryBackgroundColor,
+            (s, v) => s with { Monitor = s.Monitor with { TempMemory = s.Monitor.TempMemory with { MemoryBackgroundColor = v } } }, transparent: true);
         BuildBattery(p);
     }
 
     private void BuildBattery(TableLayoutPanel p)
     {
+        Field(p, "機器の一覧", deviceLoading, "取得済みの機器一覧を画面の表示後に読み込みます。");
         Check(p, "電池のアイコンを出す", "周辺機器の電池残量を通知領域に表示します。", s => s.Battery.Enabled,
             (s, v) => s with { Battery = s.Battery with { Enabled = v } });
         Check(p, "ロジクールの機器", "Logi Bolt につながった対応機器の電池を表示します。", s => s.Battery.Logitech,
@@ -59,6 +66,10 @@ internal sealed partial class SettingsWindow
             (s, v) => s with { Battery = s.Battery with { Bluetooth = v } });
         Check(p, "AirPods の電池を読む", "AirPods がこの PC につながっている間だけ、AirPods が飛ばす電波から読みます（10% きざみ）。人の多い場所では、まれに他の人の AirPods を拾うことがあります。", s => s.Battery.AirPods,
             (s, v) => s with { Battery = s.Battery with { AirPods = v } });
+        Check(p, "iPhone・iPad の電池を読む（USB）", "USB でつないだ iPhone・iPad の電池を、iTunes や「Apple デバイス」アプリと一緒に入る Apple のサービス経由で読みます。この PC を「信頼」した機器だけです。", s => s.Battery.AppleDevices,
+            (s, v) => s with { Battery = s.Battery with { AppleDevices = v } });
+        Check(p, "Android などの電池を読む（USB）", "USB でつないで「ファイル転送」にした Android などの電池を、Windows のファイルのやり取りの仕組みから読みます（「充電のみ」では読めません）。PC から電源を受けている間は充電中とみなします。", s => s.Battery.AndroidDevices,
+            (s, v) => s with { Battery = s.Battery with { AndroidDevices = v } });
         Check(p, "Sony のヘッドホンに直接聞く", "決まった間隔で数秒だけつないで、電池と充電中かどうかを聞きます。スマホの Sony のアプリと同時には使えないので、聞けないときは Windows の残量を使います。", s => s.Battery.SonyDirect,
             (s, v) => s with { Battery = s.Battery with { SonyDirect = v } });
         Number(p, "Sony のヘッドホンに聞く間隔（秒）", "短いほど、充電の始まり・終わりが早く出ます。そのぶん、スマホの Sony のアプリとぶつかりやすくなります。", 5, 600, s => s.Battery.SonyPollSeconds,
@@ -89,7 +100,7 @@ internal sealed partial class SettingsWindow
             string value = name.Text;
             if (string.IsNullOrWhiteSpace(value)) return;
             int index = list.Items.Cast<DeviceName>().ToList().FindIndex(d => d.Name == value);
-            if (index < 0) index = list.Items.Add(new DeviceName(value, deviceNames().Contains(value, StringComparer.Ordinal)));
+            if (index < 0) index = list.Items.Add(new DeviceName(value, cachedDeviceNames.Contains(value, StringComparer.Ordinal)));
             list.SetItemChecked(index, true); name.Clear();
         }
         group.Controls.Add(Button("名前を追加", AddName));
@@ -98,13 +109,19 @@ internal sealed partial class SettingsWindow
             if (e.KeyCode == Keys.Enter) { AddName(); e.Handled = true; e.SuppressKeyPress = true; }
         };
         Field(p, "出さない機器", group, "チェックした名前のアイコンを隠します。下の欄から名前を追加できます（大文字・小文字も区別します）。");
-        loaders.Add(s =>
+        void LoadNames(IEnumerable<string> hidden)
         {
-            var known = deviceNames().ToHashSet(StringComparer.Ordinal);
+            var known = cachedDeviceNames.ToHashSet(StringComparer.Ordinal);
             list.Items.Clear(); name.Clear();
-            foreach (string item in known.Concat(s.Battery.Hidden).Distinct(StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal))
-                list.Items.Add(new DeviceName(item, known.Contains(item)), s.Battery.Hidden.Contains(item, StringComparer.Ordinal));
-        });
+            foreach (string item in known.Concat(hidden).Distinct(StringComparer.Ordinal).OrderBy(n => n, StringComparer.Ordinal))
+                list.Items.Add(new DeviceName(item, known.Contains(item)), hidden.Contains(item, StringComparer.Ordinal));
+        }
+        loaders.Add(s => LoadNames(s.Battery.Hidden));
+        refreshDeviceNames = () =>
+        {
+            var hidden = Hidden(); string pending = name.Text;
+            LoadNames(hidden); name.Text = pending;
+        };
         List<string> Hidden() => list.CheckedItems.Cast<DeviceName>().Select(d => d.Name).ToList();
         snapshots.Add(Hidden);
         snapshots.Add(() => name.Text);
@@ -124,7 +141,9 @@ internal sealed partial class SettingsWindow
     {
         var p = Page("その他");
         autoStart = new CheckBox { Text = "Windows の起動時に PartsTray を起動する", AutoSize = true };
+        autoStart.Enabled = false;
         Field(p, "自動起動", autoStart, "チェックした時点で反映します。保存・キャンセルや既定に戻す操作の対象にはなりません。");
+        Field(p, null, autoStartLoading, "");
         autoStart.CheckedChanged += (_, _) =>
         {
             if (refreshingAutoStart) return;
@@ -132,6 +151,8 @@ internal sealed partial class SettingsWindow
             catch (Exception ex) { MessageBox.Show(this, "自動起動を変更できませんでした。\n" + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
             RefreshAutoStart();
         };
+        Check(p, "管理者として動かす", "タスクマネージャーなど、管理者で動いているアプリの窓も切り替えやジェスチャーの対象にします。オンにすると手動起動時に Windows の確認（UAC）が出ます。自動起動はタスク スケジューラーを使うので、ログオン時には出ません。適用・OK のあとで再起動を選べます。", s => s.RunAsAdministrator,
+            (s, v) => s with { RunAsAdministrator = v });
         Check(p, "横スクロールの記録を取る", "動きの調査用にログを残します。普段はオフにしてください。", s => s.Diagnostics.WheelTrace,
             (s, v) => s with { Diagnostics = s.Diagnostics with { WheelTrace = v } });
         Field(p, "設定ファイル", Button("設定ファイルを開く", () => openPath(configPath)), "設定を直接編集できます。画面の未保存の変更は含まれません。");

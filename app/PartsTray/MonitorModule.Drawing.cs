@@ -9,31 +9,46 @@ namespace PartsTray;
 internal sealed partial class MonitorModule
 {
     private static Bitmap Canvas(int size) => new(size, size, PixelFormat.Format32bppArgb);
-    private Color ParseColor(string text, Color fallback) =>
-        Palette.ForTaskbar(MonitorColor.TryParse(text, out var c) ? Color.FromArgb(c.R, c.G, c.B) : fallback, theme.IsLight);
+    private Color ParseColor(string text, Color fallback, string background = "")
+    {
+        Color color = MonitorColor.TryParse(text, out var c) ? Color.FromArgb(c.R, c.G, c.B) : fallback;
+        return MonitorColor.TryParse(background, out var b)
+            ? Palette.ForBackground(color, Color.FromArgb(b.R, b.G, b.B))
+            : Palette.ForTaskbar(color, theme.IsLight);
+    }
+
+    private static void FillBackground(Bitmap bitmap, string text, int top, int height)
+    {
+        if (!MonitorColor.TryParse(text, out var c)) return;
+        using var graphics = Graphics.FromImage(bitmap);
+        using var brush = new SolidBrush(Color.FromArgb(c.R, c.G, c.B));
+        graphics.FillRectangle(brush, 0, top, bitmap.Width, height);
+    }
 
     private void DrawTempMemory()
     {
         if (TrayInteraction.Busy) return;   // 通知領域で並べ替え中は描き替えない
         if (settings.TempMemory.Split)
         {
-            DrawBig(mainSlot, temperature is { } reading ? MonitorMath.Round(reading.Average) : null, ParseColor(settings.TempMemory.TempColor, Color.Red));
+            DrawBig(mainSlot, temperature is { } reading ? MonitorMath.Round(reading.Average) : null, ParseColor(settings.TempMemory.TempColor, Color.Red, settings.TempMemory.TempBackgroundColor), settings.TempMemory.TempBackgroundColor);
             return;
         }
         int size = IconSize(), wide = MonitorFont.TempMemoryHeight(size), height = DigitArt.Height(size, settings.DigitStyle, wide), row = (size - 1) / 2;
         using var bitmap = Canvas(size);
+        FillBackground(bitmap, settings.TempMemory.TempBackgroundColor, 0, size / 2);
+        FillBackground(bitmap, settings.TempMemory.MemoryBackgroundColor, size / 2, size - size / 2);
         string tempText = temperature is { } t ? DigitArt.Fit(MonitorMath.Round(t.Average), size, settings.DigitStyle, wide) : "--";
-        DrawText(bitmap, tempText, height, (row - height) / 2, ParseColor(settings.TempMemory.TempColor, Color.Red));
+        DrawText(bitmap, tempText, height, (row - height) / 2, ParseColor(settings.TempMemory.TempColor, Color.Red, settings.TempMemory.TempBackgroundColor));
         string memoryText = memoryLoad is { } load ? DigitArt.Fit((int)load, size, settings.DigitStyle, wide) : "--";
-        DrawText(bitmap, memoryText, height, size - row + (row - height) / 2, ParseColor(settings.TempMemory.MemoryColor, Color.White));
+        DrawText(bitmap, memoryText, height, size - row + (row - height) / 2, ParseColor(settings.TempMemory.MemoryColor, Color.White, settings.TempMemory.MemoryBackgroundColor));
         mainSlot.Replace(bitmap);
     }
 
-    private void DrawBig(TrayIconSlot<BigDrawingKey> slot, int? value, Color color)
+    private void DrawBig(TrayIconSlot<BigDrawingKey> slot, int? value, Color color, string background)
     {
         if (TrayInteraction.Busy) return;
         int size = IconSize();
-        var key = new BigDrawingKey(value, size, settings.DigitStyle, color.ToArgb());
+        var key = new BigDrawingKey(value, size, settings.DigitStyle, color.ToArgb(), background);
         if (slot.Key == key) return;
         var mask = DigitArt.Big(value, size, settings.DigitStyle);
         // 例: 幅不足で 100 も 99 と描く場合、実値だけが変わっても差し替えない。
@@ -45,6 +60,7 @@ internal sealed partial class MonitorModule
             return;
         }
         using var bitmap = Canvas(size);
+        FillBackground(bitmap, background, 0, size);
         int left = (size - mask.GetLength(1)) / 2, top = (size - mask.GetLength(0)) / 2;
         // 万一アイコンより大きい文字が来ても落ちないよう、はみ出した点は描かない（起動時に例外が出るとアプリごと止まる）。
         for (int y = 0; y < mask.GetLength(0); y++)

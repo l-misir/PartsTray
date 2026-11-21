@@ -1,3 +1,5 @@
+// CPU 使用率・温度の変換と数字の点を定義します。
+// 温度の有効範囲や数字の形を変えるときに開きます。
 using System.Buffers.Binary;
 using System.Globalization;
 
@@ -45,7 +47,7 @@ public static class MonitorMath
         foreach (double k in kelvins)
         {
             double c = k - 273.15;
-            if (double.IsNaN(c) || c <= 0 || c >= 150) continue;
+            if (double.IsNaN(c) || c < 20 || c >= 150) continue;
             if (best is null || c > best) best = c;
         }
         return best is { } t ? new CpuTemperature(t, t) : null;

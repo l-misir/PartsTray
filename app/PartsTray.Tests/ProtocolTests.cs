@@ -39,6 +39,13 @@ public sealed class ProtocolTests
         Assert.Equal((ushort)0x5B, InputSequence.ForKeys("Win+Up")[0].VirtualKey);
         Assert.Equal(new uint[] { 0, 2 }, InputSequence.ForKeys("PrintScreen").Select(k => k.Flags));
         Assert.Equal((nuint)0x4C474150, KeyStroke.ExtraInfo);
+        // ウィンドウ操作のキー：修飾キーを順に押し、逆の順に離す。矢印は拡張キー。
+        Assert.Equal(new ushort[] { 0x11, 0x12, 0x10, 0x79, 0x79, 0x10, 0x12, 0x11 }, InputSequence.ForKeys("Ctrl+Alt+Shift+F10").Select(k => k.VirtualKey));
+        Assert.Equal(new uint[] { 0, 0, 0, 0, 2, 2, 2, 2 }, InputSequence.ForKeys("Ctrl+Alt+Shift+F10").Select(k => k.Flags));
+        Assert.Equal(new uint[] { 0, 0, 1, 3, 2, 2 }, InputSequence.ForKeys("Ctrl+Alt+Up").Select(k => k.Flags));
+        Assert.Equal(new ushort[] { 0x12, 0x5B, 0x4D, 0x4D, 0x5B, 0x12 }, InputSequence.ForKeys("Win+Alt+M").Select(k => k.VirtualKey));
+        Assert.Throws<ArgumentException>(() => InputSequence.ForKeys("F10"));
+        Assert.Throws<ArgumentException>(() => InputSequence.ForKeys(""));
     }
     [Fact] public void NativeWheelScalingTruncatesAndResetsFraction()
     {

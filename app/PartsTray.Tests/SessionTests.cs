@@ -26,6 +26,19 @@ public sealed class SessionTests
         h.Buttons(0xC3, 0x1A0); h.Session.Pump();
         Assert.Equal(new[] { "PrintScreen", "Win+Up" }, h.Input.KeyEvents.Skip(2));
     }
+    [Fact] public void WindowButtonsSendTheWindowKeysAndFollowKeyChanges()
+    {
+        var buttons = new Dictionary<string, ButtonSettings> { ["0x0056"] = new() { Action = "Maximize" }, ["0x0053"] = new() { Action = "NextMaximized" } };
+        var config = new AppSettings { GapFiller = new() { Enabled = true, Buttons = buttons }, WindowKeys = new() { Maximize = "Ctrl+Alt+Shift+F10" } };
+        var h = new Harness(config); h.Activate();
+        h.Buttons(0x56); h.Session.Pump(); h.Buttons(); h.Session.Pump();
+        h.Buttons(0x53); h.Session.Pump(); h.Buttons(); h.Session.Pump();   // 切り替えのキーは空なので送らない
+        Assert.Equal(new[] { "Ctrl+Alt+Shift+F10" }, h.Input.KeyEvents);
+        Assert.Contains(h.Log.Lines, l => l.Contains("ウィンドウ操作のキーが空"));
+        h.Session.UpdateSettings(config with { WindowKeys = new() { Maximize = "Ctrl+Alt+Shift+F10", NextMaximized = "Ctrl+Alt+Shift+F11" } });
+        h.Buttons(0x53); h.Session.Pump();
+        Assert.Equal("Ctrl+Alt+Shift+F11", h.Input.KeyEvents[^1]);
+    }
     [Fact] public void ThreeMiddlePressesToggleDpiAndReconnectResets()
     {
         var h = new Harness(); h.Activate(); h.Sent.Clear();
