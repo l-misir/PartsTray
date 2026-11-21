@@ -30,6 +30,7 @@ internal static class Program
             string suffix = identity.User?.Value ?? throw new InvalidOperationException("ユーザー SID がありません");
             AdministratorRestart.WaitForParent(args);
             using var instance = new SingleInstance(suffix);
+            if (args.Contains("--exit")) { instance.Exit.Set(); return; }   // 動いている PartsTray に終わってもらう（入れ替え用）
             if (!instance.Acquire(AdministratorRestart.IsRestart(args) ? 5000 : 0)) { instance.Show.Set(); return; }
             string? startupNotice = null;
             try
@@ -91,7 +92,7 @@ internal sealed partial class TrayContext : ApplicationContext
     private readonly System.Windows.Forms.Timer settingsTimer = new() { Interval = 1000 };
     private readonly System.Windows.Forms.Timer clickTimer = new() { Interval = SystemInformation.DoubleClickTime };
     private SettingsDestination menuDestination = new(), clickDestination = new();
-    private readonly RegisteredWaitHandle showWait;
+    private readonly RegisteredWaitHandle showWait, exitWait;
     private DateTime configStamp;
     private bool disposing;
     private SettingsWindow? settingsWindow;
@@ -125,6 +126,19 @@ internal sealed partial class TrayContext : ApplicationContext
         menu.Items.Add(status);
         menu.Items.Add("設定…", null, (_, _) => OpenSettings(menuDestination));
         foreach (var module in modules) menu.Items.AddRange(module.CreateMenuItems().ToArray());
+        var digitPreview = new ToolStripMenuItem("数字の試し表示");
+        digitPreview.Click += (_, _) =>
+        {
+            try
+            {
+                var saved = AppSettings.Load(configPath);
+                var diagnostics = saved.Diagnostics with { DigitPreview = digitPreview.Checked ? [] : [8, 37, 99, 100, 150] };
+                AppSettings.Save(configPath, saved with { Diagnostics = diagnostics });
+                Reload(force: true);
+            }
+            catch (Exception ex) { MessageBox.Show("数字の試し表示を変更できませんでした。\n" + ex.Message, "PartsTray", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        };
+        menu.Items.Add(digitPreview);
         menu.Items.Add("設定ファイルを開く", null, (_, _) => Open(configPath));
         menu.Items.Add("ログフォルダを開く", null, (_, _) =>
         {
@@ -134,6 +148,7 @@ internal sealed partial class TrayContext : ApplicationContext
         menu.Items.Add(autoStart);
         menu.Opening += (_, _) =>
         {
+            digitPreview.Checked = currentSettings.Diagnostics.DigitPreview.Length > 0;
             try { autoStart.Checked = ReadAutoStart(); }
             catch (Exception ex) { log.Write($"自動起動の読取失敗: {ex.Message}"); }
         };
@@ -151,6 +166,7 @@ internal sealed partial class TrayContext : ApplicationContext
         if (startupNotice != null) Post(() => SwitchNotice(startupNotice));
         SystemEvents.PowerModeChanged += PowerChanged;
         showWait = ThreadPool.RegisterWaitForSingleObject(show, (_, _) => Post(OpenSettings), null, Timeout.Infinite, false);
+        exitWait = ThreadPool.RegisterWaitForSingleObject(instance.Exit, (_, _) => Post(() => { log.Write("ほかの起動から終了を頼まれました（--exit）"); ExitThread(); }), null, Timeout.Infinite, true);
         settingsTimer.Tick += (_, _) => Reload(); settingsTimer.Start();
         if (firstRun) ShowFirstRunGuide();
     }
@@ -206,13 +222,13 @@ internal sealed partial class TrayContext : ApplicationContext
     });
     private void PowerChanged(object sender, PowerModeChangedEventArgs e)
     { if (e.Mode == PowerModes.Resume) gap.ResumeFromSleep(); }
-    private void Reload()
+    private void Reload(bool force = false)
     {
         settingsWindow?.RefreshSupportedMouse(gap.SupportedMouseSeen);
         try
         {
             var stamp = File.Exists(configPath) ? File.GetLastWriteTimeUtc(configPath) : default;
-            if (stamp == configStamp) return;
+            if (!force && stamp == configStamp) return;
             var settings = AppSettings.Load(configPath);
             if (settings.RunAsAdministrator != currentSettings.RunAsAdministrator)
                 autoStartManager.Reconcile(settings.RunAsAdministrator);
@@ -228,7 +244,7 @@ internal sealed partial class TrayContext : ApplicationContext
     {
         if (disposingManaged && !disposing)
         {
-            disposing = true; settingsTimer.Stop(); settingsTimer.Dispose(); clickTimer.Dispose(); showWait.Unregister(null);
+            disposing = true; settingsTimer.Stop(); settingsTimer.Dispose(); clickTimer.Dispose(); showWait.Unregister(null); exitWait.Unregister(null);
             settingsWindow?.Dispose(); settingsWindow = null;
             SystemEvents.PowerModeChanged -= PowerChanged;
             gap.Session.StateChanged -= StateChanged;

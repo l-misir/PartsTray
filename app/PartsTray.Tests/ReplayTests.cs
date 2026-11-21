@@ -1,3 +1,5 @@
+// 保存済みの通信ログを再生し、適用順序と引き継ぎ後の二重送信防止を検証します。
+// ボタンを増減した場合の書き込みや撤退時刻を変えるときに開きます。
 using System.Globalization;
 using System.Text.RegularExpressions;
 using PartsTray.Core;
@@ -8,11 +10,16 @@ namespace PartsTray.Tests;
 public sealed class ReplayTests
 {
     [Theory]
-    [InlineData("sniff_20261118_224803.log", 22.656, 23.539)]
-    [InlineData("sniff_20261118_230321.log", 1.129, 17.455)]
-    public void RealLogReplayAppliesAndRetreatsAtExpectedTimes(string file, double linkTime, double retreatTime)
+    [InlineData("sniff_20261118_224803.log", 22.656, 23.539, false)]
+    [InlineData("sniff_20261118_224803.log", 22.656, 23.539, true)]
+    [InlineData("sniff_20261118_230321.log", 1.129, 17.455, false)]
+    [InlineData("sniff_20261118_230321.log", 1.129, 17.455, true)]
+    public void RealLogReplayAppliesAndRetreatsAtExpectedTimes(string file, double linkTime, double retreatTime, bool includeRear)
     {
-        var h = new Harness(new() { GapFiller = new() { Enabled = true, ThumbWheel = new() { Mode = "divert" } } }); bool sawLink = false, sawRetreat = false;
+        var gap = new GapSettings { Enabled = true, ThumbWheel = new() { Mode = "divert" } };
+        if (includeRear) gap = SettingsText.SetButton(gap, "0x00C4", "Hold");
+        ushort[] expectedCids = includeRear ? [0x52, 0xC4, 0x56, 0x53, 0xC3, 0x1A0] : [0x52, 0x56, 0x53, 0xC3, 0x1A0];
+        var h = new Harness(new() { GapFiller = gap }); bool sawLink = false, sawRetreat = false;
         bool sawCopy = false, sawPaste = false; int reports = 0;
         foreach (string line in File.ReadLines(Path.Combine(AppContext.BaseDirectory, "Fixtures", file)))
         {
@@ -34,10 +41,10 @@ public sealed class ReplayTests
                 Assert.Equal(SessionState.Retreated, h.Session.State); // No input until the reporting query completes.
                 int before = h.Writes.Length; h.Session.Pump();
                 Assert.Equal(SessionState.Active, h.Session.State);
-                var writes = h.Writes.Skip(before).ToArray(); Assert.Equal(7, writes.Length);
+                var writes = h.Writes.Skip(before).ToArray(); Assert.Equal(expectedCids.Length + 2, writes.Length);
                 Assert.Equal(20, writes[0][2]);
-                Assert.Equal(GapSession.ButtonOrder, writes.Skip(1).Take(5).Select(r => HidReport.U16(r.AsSpan(4, 2))));
-                Assert.Equal(19, writes[6][2]); sawLink = true;
+                Assert.Equal(expectedCids, writes.Skip(1).Take(expectedCids.Length).Select(r => HidReport.U16(r.AsSpan(4, 2))));
+                Assert.Equal(19, writes[^1][2]); sawLink = true;
             }
             if (!sawRetreat && seconds == retreatTime && sawLink)
             { Assert.Equal(SessionState.Retreated, h.Session.State); sawRetreat = true; }

@@ -10,6 +10,7 @@ internal sealed class SingleInstance : IDisposable
 {
     private readonly Mutex mutex;
     public EventWaitHandle Show { get; }
+    public EventWaitHandle Exit { get; }
     private bool owned;
 
     public SingleInstance(string sid)
@@ -21,6 +22,10 @@ internal sealed class SingleInstance : IDisposable
             Show = new EventWaitHandle(false, EventResetMode.AutoReset);
             try { Show.SafeWaitHandle = Create("Local\\PartsTray.Show." + sid, sid, true); }
             catch { Show.Dispose(); throw; }
+            // 11/21：管理者で動いているときも、ふつうの権限から「PartsTray.exe --exit」で終わらせられるように（入れ替えのため）。
+            Exit = new EventWaitHandle(false, EventResetMode.AutoReset);
+            try { Exit.SafeWaitHandle = Create("Local\\PartsTray.Exit." + sid, sid, true); }
+            catch { Exit.Dispose(); Show.Dispose(); throw; }
         }
         catch { mutex.Dispose(); throw; }
     }
@@ -33,7 +38,7 @@ internal sealed class SingleInstance : IDisposable
         return owned;
     }
     public void Release() { if (owned) { mutex.ReleaseMutex(); owned = false; } }
-    public void Dispose() { Release(); Show.Dispose(); mutex.Dispose(); }
+    public void Dispose() { Release(); Exit.Dispose(); Show.Dispose(); mutex.Dispose(); }
 
     private static SafeWaitHandle Create(string name, string sid, bool isEvent)
     {

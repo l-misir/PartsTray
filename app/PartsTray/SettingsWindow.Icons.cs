@@ -155,6 +155,8 @@ internal sealed partial class SettingsWindow
             (s, v) => s with { RunAsAdministrator = v });
         Check(p, "横スクロールの記録を取る", "動きの調査用にログを残します。普段はオフにしてください。", s => s.Diagnostics.WheelTrace,
             (s, v) => s with { Diagnostics = s.Diagnostics with { WheelTrace = v } });
+        Check(p, "高速スクロールの判定を記録する", "カーソルの位置、窓のクラス名、高速スクロールが効いた理由・効かなかった理由をログに残します。",
+            s => s.Diagnostics.ScrollProbe, (s, v) => s with { Diagnostics = s.Diagnostics with { ScrollProbe = v } });
         Field(p, "設定ファイル", Button("設定ファイルを開く", () => openPath(configPath)), "設定を直接編集できます。画面の未保存の変更は含まれません。");
         Field(p, "ログ", Button("ログフォルダを開く", () => openPath(Path.Combine(AppContext.BaseDirectory, "logs"))), "動作記録のフォルダを開きます。");
         Field(p, "設定を戻す", Button("すべて既定に戻す", () =>

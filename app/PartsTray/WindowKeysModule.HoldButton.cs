@@ -17,7 +17,7 @@ internal sealed partial class WindowKeysModule
         {
             if (current is not { } keys || !WindowHoldButton.TryParse(keys.HoldButton, out ushort cid) || cid == 0) return;
             if (buttons.Contains(cid) && receivedHoldButtons.Add(cid))
-                log.Write($"{WindowHoldButton.Label(keys.HoldButton)}の押下を受け取りました（Options+ が横取りしています）");
+                log.Write($"{WindowHoldButton.Label(keys.HoldButton)}の押下を受け取りました（機器のボタン通知）");
 
             // 開始前にキーによる選択を閉じ、集計を混ぜない。押下だけでは Switch しない。
             if (!holdSelection.IsPressed && buttons.Contains(cid)) EndWheelSelection();

@@ -1,3 +1,4 @@
+// カーソル下の窓と UI オートメーション要素を調べ、ジェスチャーに必要な Windows 操作を行います。
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -7,53 +8,28 @@ using N = PartsTray.GestureNative;
 
 namespace PartsTray;
 
-/// <summary>Selection-only UIA lane. Warm-up and selection run on the same MTA thread;
-/// there is at most one in-flight call even when a provider never returns.</summary>
-internal sealed class AutomationLane : IDisposable
-{
-    private int busy;
-    private readonly System.Collections.Concurrent.BlockingCollection<Action> queue = new(1);
-    public AutomationLane(Action warmUp)
-    {
-        busy = 1;
-        queue.Add(() => { try { warmUp(); } finally { Volatile.Write(ref busy, 0); } });
-        var thread = new Thread(() => { foreach (var work in queue.GetConsumingEnumerable()) work(); })
-            { IsBackground = true, Name = "PartsTray UI Automation" };
-        thread.SetApartmentState(ApartmentState.MTA); thread.Start();
-    }
-    public T Run<T>(Func<Func<bool>, T> operation, int timeout, T fallback)
-    {
-        if (Interlocked.CompareExchange(ref busy, 1, 0) != 0) return fallback;
-        long deadline = Environment.TickCount64 + timeout;
-        var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        Action work = () =>
-        {
-            try { completion.TrySetResult(operation(() => Environment.TickCount64 < deadline)); }
-            catch { completion.TrySetResult(fallback); }
-            finally { Volatile.Write(ref busy, 0); }
-        };
-        try { if (!queue.TryAdd(work)) { Volatile.Write(ref busy, 0); return fallback; } }
-        catch (InvalidOperationException) { Volatile.Write(ref busy, 0); return fallback; }
-        return completion.Task.Wait(timeout) ? completion.Task.Result : fallback;
-    }
-    public void Dispose() => queue.CompleteAdding();
-}
-
-internal sealed class WindowsGestureServices : IGestureHitTest, IGestureInput, IDisposable
+internal sealed partial class WindowsGestureServices : IGestureHitTest, IGestureInput, IDisposable
 {
     private readonly ILog log;
-    private readonly AutomationLane selectionLane;
+    private readonly Func<AppSettings> readSettings;
+    private readonly IClock clock;
+    private readonly ScrollProbeLog probeLog;
+    private readonly SingleFlightWorker scrollBarLane = new("PartsTray scroll bar UI Automation");
+    private readonly ScrollBarAutomation scrollBarAutomation = new();
+    private readonly ScrollBarAutomation edgeScrollBarAutomation = new();
+    private bool reportedAutomationScrollBar;
+    private readonly SingleFlightWorker selectionLane;
     private readonly SingleFlightWorker focusWorker;
     private readonly PointerWindowPolicy pointerWindows;
-    public WindowsGestureServices(ILog log)
+    public WindowsGestureServices(ILog log, Func<AppSettings> readSettings, IClock clock)
     {
         this.log = log;
+        this.readSettings = readSettings;
+        this.clock = clock;
+        probeLog = new(log);
         pointerWindows = new(new NativePointerWindows(), log);
-        selectionLane = new(() =>
-        {
-            try { _ = AutomationElement.RootElement; }
-            catch (Exception ex) { log.Write($"UIA 暖機失敗: {ex.Message}"); }
-        });
+        selectionLane = new("PartsTray selection UI Automation", ex => log.Write($"UIA 暖機失敗: {ex.Message}"));
+        selectionLane.TryPost(() => { _ = AutomationElement.RootElement; });
         focusWorker = new("PartsTray HWND focus", ex => log.Write($"HWND フォーカス処理例外: {ex.Message}"));
     }
     public static nint Root(PixelPoint p) => N.GetAncestor(N.WindowFromPoint(new(p.X, p.Y)), 2);
@@ -65,10 +41,10 @@ internal sealed class WindowsGestureServices : IGestureHitTest, IGestureInput, I
         try { var b = new StringBuilder(32768); uint size = (uint)b.Capacity; return N.QueryFullProcessImageNameW(process, 0, b, ref size) ? b.ToString() : ""; }
         finally { N.CloseHandle(process); }
     }
-    private static int NonClient(nint window, PixelPoint p)
+    private static int NonClient(nint window, PixelPoint p, uint timeoutMilliseconds = PointerWindowPolicy.NonClientTimeoutMilliseconds)
     {
         nint packed = unchecked((nint)((p.Y & 0xffff) << 16 | p.X & 0xffff));
-        return N.SendMessageTimeoutW(window, 0x84, 0, packed, 2, 50, out nuint result) != 0 ? unchecked((int)result) : 0;
+        return N.SendMessageTimeoutW(window, 0x84, 0, packed, 2, timeoutMilliseconds, out nuint result) != 0 ? unchecked((int)result) : 0;
     }
     public HitResult HitTest(PointerEvent e, AppSettings settings)
     {
@@ -87,11 +63,11 @@ internal sealed class WindowsGestureServices : IGestureHitTest, IGestureInput, I
         }
         if (hit == 8 && e.Button == PointerButton.Right) command = settings.TitleBar.MinimizeButtonRightClick;
         if (command is not (null or "None")) return new(root, false, command);
-        string process = Path.GetFileName(Executable(root));
+        string process = RememberProcess(root)?.Name ?? "";
         if (settings.Gesture.ExcludedProcesses.Contains(process, StringComparer.OrdinalIgnoreCase)) return new(root, false);
         if (e.Button == PointerButton.Right && settings.Gesture.ExplorerSkipSelectedItems && process.Equals("explorer.exe", StringComparison.OrdinalIgnoreCase))
         {
-            bool selected = selectionLane.Run(_ => IsSelectedItem(e.Position), 50, false);
+            bool selected = selectionLane.RunWithTimeout(_ => IsSelectedItem(e.Position), 50, false);
             if (selected) return new(root, false);
         }
         return new(root, true);
@@ -117,26 +93,6 @@ internal sealed class WindowsGestureServices : IGestureHitTest, IGestureInput, I
         }
         return false;
     }
-    public PointerCache Probe(PixelPoint p, TimeSpan at)
-    {
-        bool scroll = pointerWindows.IsVerticalScrollBar(p);
-        long disabled = 0; PixelPoint origin = default;
-        N.EnumWindows((window, _) =>
-        {
-            if (!N.IsWindowVisible(window) || N.IsIconic(window) || !N.GetWindowRect(window, out var rect) || !rect.Contains(p.X, p.Y)) return true;
-            if (N.DwmGetWindowAttribute(window, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
-            // Ignore our click-through overlays when walking physical Z order.
-            if ((N.GetWindowLongPtrW(window, -20).ToInt64() & 0x20) != 0) return true;
-            if (!N.IsWindowEnabled(window))
-            {
-                var info = new N.TitleBarInfo { Size = (uint)Marshal.SizeOf<N.TitleBarInfo>() };
-                if (N.GetTitleBarInfo(window, ref info) && info.Rect.Contains(p.X, p.Y))
-                { disabled = window; origin = new(rect.Left, rect.Top); }
-            }
-            return false; // An enabled/occluding window above it must not be dragged through.
-        }, 0);
-        return new(p, at, scroll, disabled, origin);
-    }
     public bool Replay(PointerEvent e)
     {
         uint flags = e.Kind switch
@@ -148,10 +104,11 @@ internal sealed class WindowsGestureServices : IGestureHitTest, IGestureInput, I
             _ => 0
         };
         if (flags == 0) return false;
-        N.Input[] inputs = [new() { Data = new() { Mouse = new() { Flags = flags, Data = unchecked((uint)e.Delta), Extra = KeyStroke.ExtraInfo } } }];
-        bool ok = N.SendInput(1, inputs, Marshal.SizeOf<N.Input>()) == 1;
-        if (!ok) log.Write($"SendInput 拒否: {e.Kind}/{e.Button} error={Marshal.GetLastWin32Error()}");
-        return ok;
+        var input = new N.Input { Data = new() { Mouse = new() {
+            Flags = flags, Data = unchecked((uint)e.Delta), Extra = KeyStroke.ExtraInfo } } };
+        bool sent = N.SendInput(1, [input], Marshal.SizeOf<N.Input>()) == 1;
+        if (!sent) log.Write($"SendInput 拒否: {e.Kind}/{e.Button} error={Marshal.GetLastWin32Error()}");
+        return sent;
     }
     public void RequestFocus(PixelPoint p, Func<bool> enabled)
         => focusWorker.TryPost(() =>
@@ -233,7 +190,7 @@ internal sealed class WindowsGestureServices : IGestureHitTest, IGestureInput, I
         }
     }
     private void Check(bool result, string action) { if (!result) log.Write($"{action} 拒否 error={Marshal.GetLastWin32Error()}"); }
-    public void Dispose() { selectionLane.Dispose(); focusWorker.Dispose(); }
+    public void Dispose() { selectionLane.Dispose(); scrollBarLane.Dispose(); focusWorker.Dispose(); }
 
     private sealed class NativePointerWindows : IPointerWindows
     {
@@ -245,7 +202,18 @@ internal sealed class WindowsGestureServices : IGestureHitTest, IGestureInput, I
             var name = new StringBuilder(256); N.GetClassNameW((nint)window, name, name.Capacity); return name.ToString();
         }
         public long Style(long window) => N.GetWindowLongPtrW((nint)window, -16).ToInt64();
-        public int NonClientHit(long window, PixelPoint p) => NonClient((nint)window, p);
+        public bool TryGetClientBounds(long window, out ScrollBarBounds bounds)
+        {
+            bounds = default;
+            if (!N.GetClientRect((nint)window, out var rect)) return false;
+            // 左上と右下を一緒に画面座標に直す。移動量が 0 の場合も変換は成功する。
+            if (N.MapWindowPoints((nint)window, 0, ref rect, 2) == 0 && Marshal.GetLastPInvokeError() != 0)
+                return false;
+            bounds = new(rect.Left, rect.Top, rect.Right, rect.Bottom);
+            return true;
+        }
+        public int ScrollBarWidthAt(PixelPoint point) => N.ScrollBarWidthAt(new(point.X, point.Y));
+        public int NonClientHit(long window, PixelPoint p, uint timeoutMilliseconds) => NonClient((nint)window, p, timeoutMilliseconds);
         public long Foreground => N.GetForegroundWindow();
         public uint ThreadOf(long window) => N.GetWindowThreadProcessId((nint)window, out _);
         public uint CurrentThread => N.GetCurrentThreadId();

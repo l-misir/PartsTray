@@ -1,3 +1,4 @@
+// フックの入力判定、再送、設定とジェスチャーの動作を実機なしで検証します。
 using System.Text.Json;
 using PartsTray.Core;
 using Xunit;
@@ -45,10 +46,15 @@ public sealed class GestureTests
             while (consumed < Effects.Count)
             {
                 var e = Effects[consumed++];
-                if (e.Kind != GestureEffectKind.Replay) continue;
-                bool ok = Input.Replay(e.Input);
-                if (!ok && e.Input.Kind == MouseEventKind.Wheel) Engine.WheelSendFailed();
-                if (e.Input.Kind == MouseEventKind.Down) Engine.ReplayCompleted(e.Token);
+                if (e.Kind == GestureEffectKind.FastScroll)
+                {
+                    if (!Input.Replay(e.Input)) Engine.WheelSendFailed();
+                }
+                else if (e.Kind == GestureEffectKind.Replay)
+                {
+                    Input.Replay(e.Input);
+                    if (e.Input.Kind == MouseEventKind.Down) Engine.ReplayCompleted(e.Token);
+                }
             }
         }
     }
@@ -233,19 +239,20 @@ public sealed class GestureTests
     {
         var h = new H(); h.Engine.SetCache(h.Hits.Probe(new(0, 0), h.Clock.Now)); h.Advance(age);
         Assert.Equal(intercept, h.Event(MouseEventKind.Wheel, x, delta: 120)); h.SendQueued();
-        if (intercept) Assert.Equal(600, Assert.Single(h.Input.Sent).Delta); else Assert.Empty(h.Input.Sent);
+        if (intercept) Assert.Equal(600, Assert.Single(h.Input.Sent).Delta);
+        else Assert.Empty(h.Input.Sent);
     }
     [Fact] public void MissingAndNegativeCacheNeverDelayWheelAndHorizontalAlwaysPasses()
     {
         var h = new H(); Assert.False(h.Event(MouseEventKind.Wheel, delta: -120));
         h.Engine.SetCache(new(new(0, 0), h.Clock.Now, false)); Assert.False(h.Event(MouseEventKind.Wheel, delta: 120));
         h.Engine.SetCache(new(new(0, 0), h.Clock.Now, true)); Assert.False(h.Event(MouseEventKind.HorizontalWheel, delta: 120));
-        Assert.Empty(h.Replays);
+        Assert.DoesNotContain(h.Effects, e => e.Kind is GestureEffectKind.FastScroll or GestureEffectKind.Replay);
     }
     [Fact] public void WheelFailureStopsInterceptionForSixtySeconds()
     {
         var h = new H(); h.Engine.SetCache(new(new(0, 0), h.Clock.Now, true)); h.Input.Success = false;
-        Assert.True(h.Event(MouseEventKind.Wheel, delta: -120)); h.SendQueued(); Assert.Equal(-600, h.Input.Sent[0].Delta);
+        Assert.True(h.Event(MouseEventKind.Wheel, delta: -120)); h.SendQueued(); Assert.Equal(-600, Assert.Single(h.Input.Sent).Delta);
         h.Advance(59999); h.Engine.SetCache(new(new(0, 0), h.Clock.Now, true)); Assert.False(h.Event(MouseEventKind.Wheel, delta: 120));
         h.Advance(1); Assert.True(h.Event(MouseEventKind.Wheel, delta: 120));
     }

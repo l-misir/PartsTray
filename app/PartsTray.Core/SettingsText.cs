@@ -47,30 +47,37 @@ public static class SettingsText
         return rows.ToDictionary(r => ParsePattern(r.Pattern), r => r.Command, StringComparer.Ordinal);
     }
 
+    // PrintScreen は旧設定との互換用。空欄は Hold と区別して拒否する。
+    public static bool ValidButtonKeys(string? text) => text == "PrintScreen" ||
+        (HotkeyText.TryParse(text, out _, out uint key) && key != 0);
+
     public static string ButtonChoice(ButtonSettings? value) => value switch
     {
         null => "None",
-        { Action: "ToggleDpi" or "Maximize" or "NextMaximized" or "PreviousMaximized" } => value.Action,
+        { Action: "ToggleDpi" or "Maximize" or "NextMaximized" or "PreviousMaximized" or "Hold" } => value.Action,
         { Action: "Keys", Keys:"Ctrl+C" or "Ctrl+V" or "PrintScreen" or "Win+Up" } => value.Keys,
+        { Action: "Keys" } when ValidButtonKeys(value.Keys) => "Keys",
         _ => throw new InvalidDataException("未対応のボタン設定です。")
     };
 
-    public static ButtonSettings? ParseButton(string choice) => choice switch
+    public static ButtonSettings? ParseButton(string choice, string? keys = null) => choice switch
     {
         "None" => null,
-        "ToggleDpi" or "Maximize" or "NextMaximized" or "PreviousMaximized" => new() { Action = choice },
+        "Keys" when ValidButtonKeys(keys) => new() { Keys = keys!.Trim() },
+        "ToggleDpi" or "Maximize" or "NextMaximized" or "PreviousMaximized" or "Hold" => new() { Action = choice },
         "Ctrl+C" or "Ctrl+V" or "PrintScreen" or "Win+Up" => new() { Keys = choice },
         _ => throw new InvalidDataException("ボタンの動作を選んでください。")
     };
 
-    public static GapSettings SetButton(GapSettings original, string cid, string choice)
+    public static GapSettings SetButton(GapSettings original, string cid, string choice, string? keys = null)
     {
         if (!GapSession.ButtonOrder.Any(c => $"0x{c:X4}" == cid))
             throw new InvalidDataException("未対応のボタンです。");
-        var value = ParseButton(choice);
+        var value = ParseButton(choice, keys);
         var buttons = new Dictionary<string, ButtonSettings>(original.Buttons);
         if (value == null) buttons.Remove(cid);
-        else if (!buttons.TryGetValue(cid, out var old) || ButtonChoice(old) != choice) buttons[cid] = value;
+        else if (!buttons.TryGetValue(cid, out var old) || ButtonChoice(old) != choice ||
+            (value.Action == "Keys" && old.Keys != value.Keys)) buttons[cid] = value;
         return original with { Buttons = buttons };
     }
 
@@ -100,7 +107,14 @@ public static class SettingsText
             RunAsAdministrator = edited.RunAsAdministrator,
             GapFiller = editGap ? edited.GapFiller with { MouseWpid = original.GapFiller.MouseWpid, OwnSwid = original.GapFiller.OwnSwid } : original.GapFiller,
             Gesture = edited.Gesture, TitleBar = edited.TitleBar, Wheel = edited.Wheel, WindowKeys = edited.WindowKeys,
-            Monitor = edited.Monitor, Diagnostics = edited.Diagnostics, MoveDisabledWindows = edited.MoveDisabledWindows,
+            Monitor = edited.Monitor with
+            {
+                HundredStyle = original.Monitor.HundredStyle, DigitFont = original.Monitor.DigitFont,
+                CpuDigitFont = original.Monitor.CpuDigitFont, TemperatureDigitFont = original.Monitor.TemperatureDigitFont,
+                MemoryDigitFont = original.Monitor.MemoryDigitFont, PlainZero = original.Monitor.PlainZero
+            },
+            Diagnostics = edited.Diagnostics with { DigitPreview = original.Diagnostics.DigitPreview },
+            MoveDisabledWindows = edited.MoveDisabledWindows,
             Battery = edited.Battery with { PictureHeight = original.Battery.PictureHeight }
         };
         value.Validate();

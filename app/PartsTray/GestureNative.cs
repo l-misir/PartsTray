@@ -1,3 +1,4 @@
+// ジェスチャーで使う窓、画面座標、入力の Windows API をまとめます。
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -46,6 +47,7 @@ internal static class GestureNative
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] internal static extern nint GetModuleHandleW(string? name);
     [DllImport("user32.dll", SetLastError = true)] internal static extern bool RegisterRawInputDevices(RawDevice[] devices, uint count, uint size);
     [DllImport("user32.dll")] internal static extern nint WindowFromPoint(Point point);
+    [DllImport("user32.dll")] internal static extern nint ChildWindowFromPointEx(nint parent, Point clientPoint, uint flags);
     [DllImport("user32.dll")] internal static extern nint GetAncestor(nint window, uint flags);
     [DllImport("user32.dll")] internal static extern nint GetParent(nint window);
     [DllImport("user32.dll")] internal static extern bool IsChild(nint parent, nint child);
@@ -67,16 +69,33 @@ internal static class GestureNative
     [DllImport("user32.dll")] internal static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] internal static extern bool IsWindowEnabled(nint window);
     [DllImport("user32.dll")] internal static extern bool IsIconic(nint window);
+    [DllImport("user32.dll")] internal static extern bool IsZoomed(nint window);
     [DllImport("user32.dll")] internal static extern bool ShowWindow(nint window, int command);
     [DllImport("user32.dll")] internal static extern bool GetWindowRect(nint window, out Rect rect);
+    [DllImport("user32.dll")] internal static extern bool GetClientRect(nint window, out Rect rect);
+    [DllImport("user32.dll", SetLastError = true)] internal static extern int MapWindowPoints(nint from, nint to, ref Rect rect, uint pointCount);
+    [DllImport("user32.dll", SetLastError = true)] internal static extern int MapWindowPoints(nint from, nint to, ref Point point, uint pointCount);
     [DllImport("user32.dll")] internal static extern bool GetTitleBarInfo(nint window, ref TitleBarInfo info);
     [DllImport("user32.dll")] internal static extern bool EnumWindows(EnumWindowProc callback, nint parameter);
     [DllImport("kernel32.dll", SetLastError = true)] internal static extern nint OpenProcess(uint access, bool inherit, uint id);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] internal static extern bool QueryFullProcessImageNameW(nint process, uint flags, StringBuilder name, ref uint size);
     [DllImport("kernel32.dll")] internal static extern bool CloseHandle(nint handle);
     [DllImport("user32.dll")] internal static extern int GetSystemMetrics(int index);
+    [StructLayout(LayoutKind.Sequential)] internal struct MonitorInfo { public uint Size; public Rect Monitor, Work; public uint Flags; }
+    [DllImport("user32.dll")] internal static extern nint MonitorFromPoint(Point point, uint flags);
+    [DllImport("user32.dll")] internal static extern bool GetMonitorInfoW(nint monitor, ref MonitorInfo info);
+    [DllImport("shcore.dll")] internal static extern int GetDpiForMonitor(nint monitor, int type, out uint dpiX, out uint dpiY);
+    [DllImport("user32.dll")] private static extern int GetSystemMetricsForDpi(int index, uint dpi);
     [DllImport("dwmapi.dll")] internal static extern int DwmGetWindowAttribute(nint window, uint attribute, out int value, int size);
     [DllImport("user32.dll")] internal static extern bool GetCursorPos(out Point point);
+
+    internal static int ScrollBarWidthAt(Point point)
+    {
+        // 窓が複数の画面をまたぐ場合も、ポインターがある画面の実効 DPI を使う。
+        nint monitor = MonitorFromPoint(point, 0);
+        if (monitor == 0 || GetDpiForMonitor(monitor, 0, out uint dpi, out _) != 0 || dpi == 0) return 0;
+        return GetSystemMetricsForDpi(2, dpi); // SM_CXVSCROLL
+    }
 
     [StructLayout(LayoutKind.Sequential)] internal struct Input { public uint Type; public InputUnion Data; }
     [StructLayout(LayoutKind.Explicit)] internal struct InputUnion

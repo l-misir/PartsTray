@@ -206,13 +206,13 @@ public static class MonitorFont
 
     // 点の文字を横にだけ伸ばす。1 文字の幅を、横幅いっぱいに収まる範囲で広げる。
     // 増やす列は外側から（幅 5 → 9 なら列の幅は 2,2,1,2,2）。縦線が太くなり、形は崩れない。
-    public static bool[,] GlyphsWide(string text, int height, int maxWidth)
+    public static bool[,] GlyphsWide(string text, int height, int maxWidth, int minimumDigits = 2)
     {
         var narrow = Glyphs(text, height);
         int baseWidth = Width(height), n = text.Length;
         if (n == 0) return narrow;
-        // 1 桁でも 2 桁のときと同じ幅にする（1 文字だけ幅いっぱいに伸ばすと形が崩れるため）。
-        int slots = Math.Max(n, 2);
+        // 通常は2桁、uniformでは3桁の字幅を短い数字にも使う。
+        int slots = Math.Max(n, minimumDigits);
         // 1 文字の幅は高さまで（縦横比 1:1 まで）。高さ 7 の CPU 使用率を幅 9 まで伸ばすと、
         // 「横に広がりすぎて読みづらい・温度と比率が違って違和感がある」とのこと（11/19）。
         int target = Math.Max(baseWidth, Math.Min(height, (maxWidth - (slots - 1)) / slots));
@@ -240,11 +240,11 @@ public static class MonitorFont
         return widths;
     }
 
-    public static int SelectHeight(int size, int rowHeight)
+    public static int SelectHeight(int size, int rowHeight, int digits = 2)
     {
         foreach (int h in new[] { 9, 7, 5 })
-            if (h <= rowHeight && Width(h) * 2 + 1 <= size) return h;
-        throw new ArgumentOutOfRangeException(nameof(size), "2 桁を描く領域が不足しています");
+            if (h <= rowHeight && Width(h) * digits + digits - 1 <= size) return h;
+        throw new ArgumentOutOfRangeException(nameof(size), $"{digits} 桁を描く領域が不足しています");
     }
     public static int TempMemoryHeight(int size) => SelectHeight(size, (size - 1) / 2);
     // オウム・電池の数字の高さ。"thin"（Core Temp 風）は温度・メモリと同じ高さにそろえる。

@@ -9,9 +9,12 @@ internal sealed partial class GestureModule
 {
     private void Decisions()
     {
+        try { PrepareWheelWindows(); }
+        finally { firstWindowScan.Set(); }
         while (Volatile.Read(ref workerStop) == 0)
         {
-            while (decisions.TryDequeue(out var e))
+            PrepareWheelWindows();
+            if (decisions.TryDequeue(out var e))
             {
                 try
                 {
@@ -25,8 +28,12 @@ internal sealed partial class GestureModule
                     else if (e.Kind == GestureEffectKind.Probe)
                     {
                         if (clock.Now - e.At > TimeSpan.FromMilliseconds(100)) continue;
+                        int probeEpoch = Volatile.Read(ref epoch);
                         var cache = services.Probe(e.Input.Position, e.At);
-                        Reply(() => engine.SetCache(cache));
+                        Reply(() =>
+                        {
+                            if (Enabled && probeEpoch == Volatile.Read(ref epoch)) engine.SetCache(cache);
+                        });
                     }
                 }
                 catch (Exception ex)
@@ -34,38 +41,52 @@ internal sealed partial class GestureModule
                     log.Write($"ヒットテスト/UIA: {ex}");
                     if (e.Kind == GestureEffectKind.HitTest) Reply(() => engine.Resolve(e.Token, default));
                 }
+                // 判定の依頼が続いている間も、新しく開いた窓の準備を挟む。
+                continue;
             }
+            services.FlushProbeLog();
             decisionWake.WaitOne(100);
         }
+        services.FlushProbeLog(stopping: true);
     }
     private void Actions()
     {
+        var wheelLog = new ScrollProbeLog(log);
         while (Volatile.Read(ref workerStop) == 0 || !actions.IsEmpty)
         {
             Volatile.Write(ref actionHeartbeat, Environment.TickCount64);
-            while (actions.TryDequeue(out var e))
+            while (actions.TryDequeue(out var action))
             {
+                var e = action.Effect;
                 try
                 {
-                    if (e.Kind == GestureEffectKind.Replay)
+                    if (e.Kind == GestureEffectKind.FastScroll) SendFastScroll(e, action.WheelKeys, wheelLog);
+                    else if (e.Kind == GestureEffectKind.Replay)
                     {
-                        bool ok = services.Replay(e.Input);
-                        if (!ok && e.Input.Kind == MouseEventKind.Wheel) Reply(engine.WheelSendFailed);
+                        services.Replay(e.Input);
                         if (e.Input.Kind == MouseEventKind.Down) Reply(() => engine.ReplayCompleted(e.Token));
                     }
                     else if (e.Kind == GestureEffectKind.Flush) Reply(() => Volatile.Write(ref hookExit, 1));
                     else if (e.Kind == GestureEffectKind.RightWheelReport) log.Write(e.Text!);
+                    else if (e.Kind == GestureEffectKind.EdgeRedirectReport)
+                    {
+                        if (e.Valid) log.Write("画面の端のホイールを内側の子ウィンドウに届け直しました");
+                        if (Volatile.Read(ref settings).Diagnostics.ScrollProbe)
+                            wheelLog.RecordWheel(e.Input, e.Target, e.Steps == 1, Environment.TickCount64);
+                    }
                     else if (e.Kind == GestureEffectKind.Warning) log.Write($"{e.Text} {e.At.TotalMilliseconds:F3}ms");
                 }
                 catch (Exception ex)
                 {
                     log.Write($"ジェスチャー送信/操作: {ex}");
-                    if (e.Kind == GestureEffectKind.Replay && e.Input.Kind == MouseEventKind.Wheel) Reply(engine.WheelSendFailed);
                 }
                 Volatile.Write(ref actionHeartbeat, Environment.TickCount64);
             }
+            if (Volatile.Read(ref settings).Diagnostics.ScrollProbe) wheelLog.FlushDue(Environment.TickCount64);
+            else wheelLog.Reset();
             actionWake.WaitOne(100);
         }
+        wheelLog.Reset();
     }
     private void Commands()
     {

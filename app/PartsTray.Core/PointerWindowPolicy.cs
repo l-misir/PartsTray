@@ -1,3 +1,4 @@
+// カーソル直下の窓を使って縦スクロールバーを見分け、フォーカス移動の対象を選びます。
 namespace PartsTray.Core;
 
 /// <summary>Native operations are injected so HWND routing can be tested without any desktop input.</summary>
@@ -8,7 +9,9 @@ public interface IPointerWindows
     long Root(long window);
     string ClassName(long window);
     long Style(long window);
-    int NonClientHit(long window, PixelPoint point);
+    int NonClientHit(long window, PixelPoint point, uint timeoutMilliseconds);
+    bool TryGetClientBounds(long window, out ScrollBarBounds bounds);
+    int ScrollBarWidthAt(PixelPoint point);
     long Foreground { get; }
     uint ThreadOf(long window);
     uint CurrentThread { get; }
@@ -24,13 +27,40 @@ public interface IPointerWindows
 public sealed class PointerWindowPolicy(IPointerWindows windows, ILog log)
 {
     private string? lastFailure;
-    public bool IsVerticalScrollBar(PixelPoint point)
+    private bool reportedChromiumScrollBar;
+    public const int NonClientTimeoutMilliseconds = 50;
+
+    public bool IsVerticalScrollBar(PixelPoint point, Func<int>? remainingMilliseconds = null) =>
+        CheckScrollBar(point, remainingMilliseconds).Hit;
+
+    public NativeScrollCheck CheckScrollBar(PixelPoint point, Func<int>? remainingMilliseconds)
     {
         long child = windows.WindowAt(point);
-        if (child == 0) return false;
+        if (child == 0) return new(false, "NoWindow");
         long style = windows.Style(child);
-        if (windows.ClassName(child) == "ScrollBar" && (style & 1) != 0) return true;
-        return (style & 0x00200000) != 0 && windows.NonClientHit(child, point) == 7;
+        string className = windows.ClassName(child);
+        if (className == "ScrollBar" && (style & 1) != 0) return new(true, "Classic");
+        string miss = "NoVerticalStyle";
+        if ((style & 0x00200000) != 0)
+        {
+            // 別プロセスへ問い合わせる直前に、両方の点で共有する残り時間を読む。
+            int wait = remainingMilliseconds?.Invoke() ?? NonClientTimeoutMilliseconds;
+            if (wait > 0 && windows.NonClientHit(child, point, (uint)wait) == 7) return new(true, "Classic");
+            miss = wait > 0 ? "NoVerticalHit" : "NativeTimeout";
+        }
+
+        if (className != "Chrome_RenderWidgetHostHWND") return new(false, miss);
+        if (!windows.TryGetClientBounds(child, out var bounds)) return new(false, "NoClientBounds");
+        int width = windows.ScrollBarWidthAt(point);
+        if (width <= 0) return new(false, "NoScrollBarWidth");
+        if (!bounds.InRightBand(point, width)) return new(false, "OutsideChromiumBand");
+
+        if (!reportedChromiumScrollBar)
+        {
+            reportedChromiumScrollBar = true;
+            log.Write("スクロールバー（Chromium の右端）を見分けました");
+        }
+        return new(true, "Chromium", child);
     }
 
     // Called only by the single focus worker. It never uses UI Automation or activates a root.

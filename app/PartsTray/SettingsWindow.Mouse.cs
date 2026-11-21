@@ -10,7 +10,7 @@ internal sealed partial class SettingsWindow
     {
         var p = Page("マウスの肩代わり");
         Field(p, null, new Label { AutoSize = true, Dock = DockStyle.Top,
-            Text = "この機能はロジクールの MX Master 4（Logi Bolt 接続）専用です。Logi Options+ が動き出すまでの間だけ働きます" }, "");
+            Text = "この機能はロジクールの MX Master 4（Logi Bolt 接続）専用です。Logi Options+ が動き出すまでの間だけ働きます。Options+ と同じ割り当てにしておくと、肩代わりの間も同じ動きになります" }, "");
         Check(p, "肩代わりする", "Options+ が動き出すまで、ボタンとポインタの速さを肩代わりします。", s => s.GapFiller.Enabled,
             (s, v) => s with { GapFiller = s.GapFiller with { Enabled = v } });
         Check(p, "Options+ に引き継いだら知らせる", "肩代わりの開始と、Options+ への引き継ぎを通知します。", s => s.GapFiller.NotifyOnSwitch,
@@ -19,17 +19,7 @@ internal sealed partial class SettingsWindow
             (s, v) => s with { GapFiller = s.GapFiller with { Dpi = s.GapFiller.Dpi with { Primary = (int)v } } }, step: 50);
         Number(p, "ポインタの速さ（切り替え後）", "速さの切り替えボタンで使う値です。次の接続から有効です。", 200, 8000, s => s.GapFiller.Dpi.Secondary,
             (s, v) => s with { GapFiller = s.GapFiller with { Dpi = s.GapFiller.Dpi with { Secondary = (int)v } } }, step: 50);
-        string[] names = ["ホイールクリック（中ボタン）", "進む（親指の前側）", "戻る（親指の後側）", "ジェスチャーボタン（親指の上）", "親指パネル（ハプティック）"];
-        for (int i = 0; i < GapSession.ButtonOrder.Count; i++)
-        {
-            string cid = $"0x{GapSession.ButtonOrder[i]:X4}";
-            ChoiceBox(p, names[i], "肩代わり中の動作です。割り当ての変更は次の接続から有効です。本当の最大化・切り替えは、「ウィンドウ・ホイール」で決めたキーを送ります。",
-                [("ToggleDpi", "ポインタの速さを切り替える"), ("Ctrl+C", "Ctrl+C（コピー）"), ("Ctrl+V", "Ctrl+V（貼り付け）"),
-                 ("PrintScreen", "PrintScreen"), ("Win+Up", "Win+↑（最大化）"), ("Maximize", "本当の最大化"),
-                 ("NextMaximized", "最大化しているアプリの切り替え"), ("PreviousMaximized", "最大化しているアプリを前へ"), ("None", "肩代わりしない")],
-                s => SettingsText.ButtonChoice(s.GapFiller.Buttons.GetValueOrDefault(cid)),
-                (s, v) => s with { GapFiller = SettingsText.SetButton(s.GapFiller, cid, v) });
-        }
+        BuildGapButtons(p);
         ChoiceBox(p, "サムホイールの方式", "親指のホイールで横に動かす方式です。変更は次の接続から有効です。",
             [("hook", "横取りせずに送り直す（hook）"), ("divert", "マウスに直接頼む（divert）"), ("off", "肩代わりしない（off）")],
             s => s.GapFiller.ThumbWheel.Mode, (s, v) => s with { GapFiller = s.GapFiller with { ThumbWheel = s.GapFiller.ThumbWheel with { Mode = v } } });
@@ -66,10 +56,17 @@ internal sealed partial class SettingsWindow
             (s, v) => s with { TitleBar = s.TitleBar with { MiddleClick = v ? "CloseWindow" : "None" } });
         Check(p, "最小化ボタンの右クリックで通知領域にしまう", "しまったウィンドウは通知領域のアイコンから戻せます。", s => s.TitleBar.MinimizeButtonRightClick != "None",
             (s, v) => s with { TitleBar = s.TitleBar with { MinimizeButtonRightClick = v ? "MinimizeToTray" : "None" } });
-        Check(p, "スクロールバーの上では速くスクロール", "標準の縦スクロールバーにカーソルを置いたときだけ速く動かします。", s => s.Wheel.FastScrollOnScrollBar,
+        Check(p, "スクロールバーの上では速くスクロール", "縦スクロールバーの上でホイールを速くします。Chrome などではページの右端も対象です。", s => s.Wheel.FastScrollOnScrollBar,
             (s, v) => s with { Wheel = s.Wheel with { FastScrollOnScrollBar = v } });
         Number(p, "速くスクロールする倍率", "スクロールバー上での動く量を 1〜100 倍にします。", 1, 100, s => s.Wheel.FastScrollMultiplier,
             (s, v) => s with { Wheel = s.Wheel with { FastScrollMultiplier = (int)v } });
+        Processes(p, "高速スクロールを使わないアプリ", "高速スクロールがうまく動かないアプリを足すと、そのアプリではふつうのスクロールになります",
+            s => s.Wheel.FastScrollExcludedProcesses, (s, v) => s with { Wheel = s.Wheel with { FastScrollExcludedProcesses = v } });
+        Check(p, "画面の端まで高速スクロールの範囲を広げる", "画面の端にカーソルを押し付けても、少し内側のスクロールバーで高速スクロールにします",
+            s => s.Wheel.EdgeAssist, (s, v) => s with { Wheel = s.Wheel with { EdgeAssist = v } });
+        Check(p, "画面の端で回したホイールを、少し内側の部品に届け直す（試し）",
+            "画面の端の少し内側にあるタブなどにホイールを届けます。届け直しを受け付けないアプリもあります",
+            s => s.Wheel.EdgeRedirect, (s, v) => s with { Wheel = s.Wheel with { EdgeRedirect = v } });
         Check(p, "カーソルの下のウィンドウをスクロール", "前面ウィンドウ内のカーソル下の枠へ入力先を移します。背景アプリは前面に出しません。", s => s.Wheel.FocusUnderCursor,
             (s, v) => s with { Wheel = s.Wheel with { FocusUnderCursor = v } });
         Check(p, "ダイアログの後ろで操作できないウィンドウも動かす", "見えているタイトルバーを左ドラッグして、操作できない親ウィンドウを移動します。", s => s.MoveDisabledWindows,

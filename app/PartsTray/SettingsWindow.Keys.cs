@@ -9,7 +9,7 @@ internal sealed partial class SettingsWindow
     private void BuildWindowKeys(TableLayoutPanel page)
     {
         ChoiceBox(page, "押しながらホイールで切り替えるボタン",
-            "Options+ で、このボタンに何かを割り当てておく必要があります（割り当てがないと、押したことが PartsTray に届きません）。押したときに何も起きないよう、どのアプリも使わないキー（例：Ctrl+Alt+Shift+F12）を割り当ててください。ホイールの後ろのボタンは肩代わりの対象外なので、肩代わり中（Options+ が動いていない間）は働きません。押している間だけ選び、離すか 30 秒で終了します。",
+            "Options+ で、このボタンに何かを割り当てておく必要があります（割り当てがないと、押したことが PartsTray に届きません）。押したときに何も起きないよう、どのアプリも使わないキー（例：Ctrl+Alt+Shift+F12）を割り当ててください。肩代わり中も使うには、「マウスの肩代わり」で同じボタンを「押しながらホイールで切り替え用（何もしない）」にしてください。押している間だけ選び、離すか 30 秒で終了します。",
             WindowHoldButton.Choices.ToArray(), s => WindowHoldButton.Canonical(s.WindowKeys.HoldButton),
             (s, v) => s with { WindowKeys = s.WindowKeys with { HoldButton = v } });
         HotkeyField(page, "本当の最大化のキー", "前面のウィンドウを最大化します（最大化していれば元に戻す）。Windows＋↑ と違い、画面の上半分などに寄っていても最大化します。欄を選んでキーを押すと入ります。空にすると使いません。",
@@ -27,7 +27,8 @@ internal sealed partial class SettingsWindow
     }
 
     // キーの欄。欄を選んで Ctrl か Alt を含む組み合わせを押すと「Ctrl+Alt+F10」のように入る。手で書いてもよい。Delete・BackSpace だけで空にする。
-    private void HotkeyField(TableLayoutPanel page, string title, string hint, Func<AppSettings, string> get, Func<AppSettings, string, AppSettings> set)
+    private TextBox HotkeyField(TableLayoutPanel page, string title, string hint, Func<AppSettings, string> get, Func<AppSettings, string, AppSettings> set,
+        Func<bool>? enabled = null, bool buttonKeys = false)
     {
         var box = new TextBox { Width = LogicalToDeviceUnits(240) };
         box.KeyDown += (_, e) =>
@@ -44,10 +45,12 @@ internal sealed partial class SettingsWindow
         Field(page, title, box, hint);
         Bind(box, get, v => box.Text = v, () =>
         {
+            if (enabled?.Invoke() == false) return "";
             string text = box.Text.Trim();
-            if (!HotkeyText.TryParse(text, out _, out _)) throw new InvalidDataException($"「{title}」の書き方が違います（例：Ctrl+Alt+Shift+F10）");
+            if (buttonKeys ? !SettingsText.ValidButtonKeys(text) : !HotkeyText.TryParse(text, out _, out _)) throw new InvalidDataException($"「{title}」の書き方が違います（例：Ctrl+Alt+Shift+F10）");
             return text;
-        }, set, () => box.Text);
+        }, (s, v) => enabled?.Invoke() == false ? s : set(s, v), () => box.Text);
+        return box;
     }
 
     private static string? KeyName(Keys key) => key switch

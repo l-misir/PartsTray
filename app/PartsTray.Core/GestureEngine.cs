@@ -3,7 +3,7 @@
 namespace PartsTray.Core;
 
 /// <summary>Single owner (hook message thread). No native calls, waits, drawing, or external callbacks
-/// except the nonblocking effect queue. Worker replies return to that same owner by token.</summary>
+/// except nonblocking posts. Worker replies return to that same owner by token.</summary>
 public sealed partial class GestureEngine(IClock clock, IGestureEffects effects, AppSettings settings)
 {
     private enum Phase { Pending, Gesture, Consumed, Replaying, Passed, Drag }
@@ -35,6 +35,7 @@ public sealed partial class GestureEngine(IClock clock, IGestureEffects effects,
     private PixelPoint position, stillPoint;
     private TimeSpan stillSince;
     private bool paused, tip, probePending;
+    private bool reportedEdgeRedirect;
     public bool Paused => paused;
     public void UpdateSettings(AppSettings value) { SetPaused(true); settings = value; SetPaused(false); }
     public void SetPaused(bool value)
@@ -96,6 +97,7 @@ public sealed partial class GestureEngine(IClock clock, IGestureEffects effects,
     public void SetCache(PointerCache value) => cache = value;
     private bool Fresh(PixelPoint p) => cache is { } c && c.Position == p && clock.Now >= c.At &&
         clock.Now - c.At <= TimeSpan.FromMilliseconds(100);
+    private bool FreshWheel(PixelPoint point) => Fresh(point) && effects.IsCurrentWheelWindow(cache!.Value.WheelWindow);
     private void Emit(GestureEffectKind kind, Capture? c = null, PointerEvent input = default, string? text = null, bool valid = false)
         => effects.Post(new(kind, c?.Token ?? 0, input, c?.Window ?? 0, text, valid, clock.Now));
 
@@ -150,13 +152,28 @@ public sealed partial class GestureEngine(IClock clock, IGestureEffects effects,
             if (TakeRightWheel(e)) return true;
             RequestProbe();
             if (settings.Wheel.FocusUnderCursor) Emit(GestureEffectKind.Focus, input: e);
-            if (e.Kind == MouseEventKind.Wheel && settings.Wheel.FastScrollOnScrollBar &&
-                clock.Now >= wheelDisabledUntil && Fresh(e.Position) && cache!.Value.VerticalScrollBar)
+            if (!FreshWheel(e.Position))
             {
-                Emit(GestureEffectKind.Replay, input: e with { Delta = e.Delta * settings.Wheel.FastScrollMultiplier });
+                if (e.Kind != MouseEventKind.Wheel || !settings.Wheel.FastScrollOnScrollBar ||
+                    !settings.Wheel.EdgeAssist || clock.Now < wheelDisabledUntil) return false;
+                var firstTarget = effects.FirstChromiumEdge(e.Position, settings.Wheel);
+                return firstTarget.Window != 0 && RedirectWheel(e, firstTarget);
+            }
+            var hit = cache!.Value;
+            if (hit.WheelExcluded) return false;
+            if (e.Kind == MouseEventKind.Wheel && settings.Wheel.FastScrollOnScrollBar &&
+                clock.Now >= wheelDisabledUntil && (hit.VerticalScrollBar || settings.Wheel.EdgeAssist && hit.EdgeScrollBar))
+            {
+                var target = settings.Wheel.EdgeAssist ? hit.ChromiumEdge : default;
+                int delta = e.Delta * settings.Wheel.FastScrollMultiplier;
+                // WM_MOUSEWHEEL の回転量は符号付き16ビット。大きな倍率でも向きを反転させない。
+                if (target.Window != 0) delta = Math.Clamp(delta, short.MinValue, short.MaxValue);
+                effects.Post(new(GestureEffectKind.FastScroll, Input: e with { Delta = delta }, At: clock.Now,
+                    Target: target, WheelWindow: hit.WheelWindow, OriginalDelta: e.Delta));
                 return true;
             }
-            return false;
+            if (!settings.Wheel.EdgeRedirect || hit.Redirect.Window == 0) return false;
+            return RedirectWheel(e, hit.Redirect);
         }
         if (e.Kind != MouseEventKind.Down) return false;
         if (e.Button == PointerButton.Left && buttons[(int)PointerButton.Right] is { } active && active.Phase is Phase.Gesture or Phase.Pending &&
@@ -200,6 +217,19 @@ public sealed partial class GestureEngine(IClock clock, IGestureEffects effects,
         }
         Emit(GestureEffectKind.HitTest, capture, e);
         return true;
+    }
+    private bool RedirectWheel(PointerEvent input, EdgeWheelTarget target)
+    {
+        bool posted = effects.TryRedirectWheel(input, target);
+        bool first = posted && !reportedEdgeRedirect;
+        reportedEdgeRedirect |= posted;
+        if (first || settings.Diagnostics.ScrollProbe)
+        {
+            // 投函済みの入力は、記録の失敗によって二重に届けない。
+            try { effects.Post(new(GestureEffectKind.EdgeRedirectReport, Input: input, Target: target,
+                Steps: posted ? 1 : 0, Valid: first)); } catch { }
+        }
+        return posted;
     }
     private Capture NewCapture(PointerEvent e)
     {

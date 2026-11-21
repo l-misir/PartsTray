@@ -114,7 +114,7 @@ public sealed class RightWheelSwitchTests
         var h = new H(); h.Down();
         h.Engine.SetCache(new Hits().Probe(default, h.Clock.Now));
         h.Effects.Clear(); Assert.True(h.Event(MouseEventKind.Wheel, -120));
-        Assert.DoesNotContain(h.Effects, e => e.Kind is GestureEffectKind.Focus or GestureEffectKind.Probe or GestureEffectKind.Replay);
+        Assert.DoesNotContain(h.Effects, e => e.Kind is GestureEffectKind.Focus or GestureEffectKind.Probe or GestureEffectKind.Replay or GestureEffectKind.FastScroll);
         Assert.Equal(new[] { 1 }, h.Steps);
     }
 
@@ -127,7 +127,8 @@ public sealed class RightWheelSwitchTests
         var h = new H(enabled: enabled); if (down) h.Down();
         h.Engine.SetCache(new Hits().Probe(default, h.Clock.Now));
         Assert.True(h.Event(MouseEventKind.Wheel, -120));
-        Assert.Equal(-600, Assert.Single(h.Effects, e => e.Kind == GestureEffectKind.Replay).Input.Delta);
+        var fast = Assert.Single(h.Effects, e => e.Kind == GestureEffectKind.FastScroll);
+        Assert.Equal(-600, fast.Input.Delta);
         Assert.Contains(h.Effects, e => e.Kind == GestureEffectKind.Focus);
         Assert.False(h.Event(MouseEventKind.HorizontalWheel, 120)); Assert.Empty(h.Steps);
         Assert.Empty(h.Reports);

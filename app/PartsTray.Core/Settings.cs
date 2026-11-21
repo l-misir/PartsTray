@@ -43,6 +43,8 @@ public sealed record AppSettings
         if (Monitor is null) throw new InvalidDataException("monitor が必要です");
         Monitor.Validate();
         if (Diagnostics is null) throw new InvalidDataException("diagnostics が必要です");
+        if (Diagnostics.DigitPreview is null || Diagnostics.DigitPreview.Any(value => value is < 0 or > 999))
+            throw new InvalidDataException("diagnostics.digitPreview は 0〜999 の整数の一覧です");
         GestureSettings.Validate(this);
         var g = GapFiller ?? throw new InvalidDataException("gapFiller が必要です");
         if (g.MouseWpid != "0xB042" || g.OwnSwid != 5)
@@ -65,8 +67,8 @@ public sealed record AppSettings
         foreach (var (cid, action) in g.Buttons)
         {
             if (!GapSession.ButtonOrder.Any(c => $"0x{c:X4}" == cid) || action is null ||
-                (action.Action is not ("ToggleDpi" or "Maximize" or "NextMaximized" or "PreviousMaximized") && (action.Action != "Keys" ||
-                action.Keys is not ("Ctrl+C" or "Ctrl+V" or "PrintScreen" or "Win+Up"))))
+                (action.Action is not ("ToggleDpi" or "Maximize" or "NextMaximized" or "PreviousMaximized" or "Hold") &&
+                (action.Action != "Keys" || !SettingsText.ValidButtonKeys(action.Keys))))
                 throw new InvalidDataException($"未対応のボタン設定: {cid}");
         }
     }
@@ -196,6 +198,9 @@ public sealed record DiagnosticsSettings
 {
     // true のとき、フックが見た横スクロールを logs/wheel_yyyyMMdd.log に記録する。
     public bool WheelTrace { get; init; } = false;
+    public bool ScrollProbe { get; init; } = false;
+    // 空なら実測値を表示する。数字の見た目を確認するときだけ、指定した順番で表示する。
+    public int[] DigitPreview { get; init; } = [];
 }
 
 public sealed record MonitorSettings
@@ -209,9 +214,20 @@ public sealed record MonitorSettings
     public int SampleIntervalMs { get; init; } = 200;
     // 数字の形（全部のアイコンで共通）。
     // "wide" = 点の文字を横に伸ばす。単独の数字はアイコン全体に収まる高さを選ぶ。
-    // "thin" = Tahoma をにじませず描く。単独の数字は「88」が収まる最大サイズ。
-    //          2 段表示・オウム・電池に重ねる数字は従来の小さいサイズを維持する。
+    // "thin" = DigitFont の書体で描く。Terminus / TerminusBold は同梱書体の原寸を使う。
     public string DigitStyle { get; init; } = "wide";
+    public const string DefaultDigitFont = "Tahoma";
+    public string DigitFont { get; init; } = DefaultDigitFont;
+    // 個別の指定がないアイコンは共通の DigitFont を使う。
+    public string CpuDigitFont { get; init; } = "";
+    public string TemperatureDigitFont { get; init; } = "";
+    public string MemoryDigitFont { get; init; } = "";
+    // 0 の輪の内側だけにある点を消す。false なら書体の元の形を残す。
+    public bool PlainZero { get; init; } = true;
+    // uniform は桁数によらず同じ大きさ。細字はインクの間に1ドットを空ける。
+    public string HundredStyle { get; init; } = "uniform";
+
+    public string ResolveDigitFont(string? iconFont) => string.IsNullOrWhiteSpace(iconFont) ? DigitFont : iconFont;
 
     public void Validate()
     {
@@ -229,6 +245,12 @@ public sealed record MonitorSettings
             throw new InvalidDataException("monitor.sampleIntervalMs は 100〜5000 です");
         if (DigitStyle is not ("wide" or "thin"))
             throw new InvalidDataException("monitor.digitStyle は wide / thin のどちらかです");
+        DigitFontSpec.Parse(DigitFont);
+        DigitFontSpec.Parse(CpuDigitFont, "monitor.cpuDigitFont");
+        DigitFontSpec.Parse(TemperatureDigitFont, "monitor.temperatureDigitFont");
+        DigitFontSpec.Parse(MemoryDigitFont, "monitor.memoryDigitFont");
+        if (HundredStyle is not ("shrink" or "narrow" or "narrowOne" or "uniform"))
+            throw new InvalidDataException("monitor.hundredStyle は shrink / narrow / narrowOne / uniform のいずれかです");
         if (Parrot.WidenPx is < 0 or > 5)
             throw new InvalidDataException("monitor.parrot.widenPx は 0〜5 です");
         if (Parrot.CpuText is not ("bottom" or "top" or "none"))

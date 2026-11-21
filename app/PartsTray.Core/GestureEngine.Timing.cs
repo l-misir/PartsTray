@@ -7,7 +7,7 @@ public sealed partial class GestureEngine
     public void WheelSendFailed()
     {
         wheelDisabledUntil = clock.Now + TimeSpan.FromSeconds(60);
-        Emit(GestureEffectKind.Warning, text: "ホイール SendInput 失敗: 高速スクロールの横取りを60秒停止");
+        Emit(GestureEffectKind.Warning, text: "ホイールの送信失敗: 高速スクロールの横取りを60秒停止");
     }
     public void Tick()
     {

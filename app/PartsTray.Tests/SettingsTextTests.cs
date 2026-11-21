@@ -1,3 +1,5 @@
+// 設定画面の入力変換と既存値の保持を検証します。
+// 対応する機能や入力条件を変えるときに開きます。
 using System.Text.Json;
 using PartsTray.Core;
 using Xunit;
@@ -102,14 +104,14 @@ public sealed class SettingsTextTests
     }
 
     [Theory]
-    [InlineData("None", "0x00C4")]
+    [InlineData("None", "0xFFFF")]
     [InlineData("unknown", "0x0052")]
     [InlineData("Ctrl+X", "0x0056")]
     public void UnsupportedButtonEditsFail(string choice, string cid) =>
         Assert.Throws<InvalidDataException>(() => SettingsText.SetButton(new GapSettings(), cid, choice));
 
     [Theory]
-    [InlineData(0x0052)] [InlineData(0x0056)] [InlineData(0x0053)] [InlineData(0x00C3)] [InlineData(0x01A0)]
+    [InlineData(0x00C4)] [InlineData(0x0052)] [InlineData(0x0056)] [InlineData(0x0053)] [InlineData(0x00C3)] [InlineData(0x01A0)]
     public void OmittedButtonIsNeverDivertedOrExecuted(int cid)
     {
         var gap = SettingsText.SetButton(new GapSettings { Enabled = true }, $"0x{cid:X4}", "None");

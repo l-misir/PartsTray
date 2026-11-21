@@ -23,7 +23,8 @@ internal sealed partial class GestureModule : IFeatureModule, IGestureEffects
     private readonly GestureEngine engine;
     private readonly INativeWheelBridge? wheelBridge;
     private readonly WheelTraceWriter wheelTrace;
-    private readonly ConcurrentQueue<GestureEffect> actions = new(), decisions = new();
+    private readonly ConcurrentQueue<(GestureEffect Effect, uint WheelKeys)> actions = new();
+    private readonly ConcurrentQueue<GestureEffect> decisions = new();
     private readonly ConcurrentQueue<(GestureEffect Effect, int Epoch)> commands = new();
     private readonly ConcurrentQueue<Action> replies = new();
     private readonly AutoResetEvent actionWake = new(false), decisionWake = new(false), commandWake = new(false);
@@ -49,14 +50,19 @@ internal sealed partial class GestureModule : IFeatureModule, IGestureEffects
         this.wheelBridge = wheelBridge;
         wheelTrace = new(log);
         wheelTrace.SetEnabled(settings.Diagnostics.WheelTrace);
-        services = new(log); hidden = new(log); overlay = new(settings.Gesture.Trail, log);
+        services = new(log, () => Volatile.Read(ref this.settings), clock);
+        hidden = new(log); overlay = new(settings.Gesture.Trail, log);
         engine = new(clock, this, settings); callback = Hook;
         CheckKazaguru(); engine.SetPaused(!Enabled);
         actionThread = new Thread(Actions) { IsBackground = true, Name = "PartsTray gesture input" };
         decisionThread = new Thread(Decisions) { IsBackground = true, Name = "PartsTray hit tests" };
         commandThread = new Thread(Commands) { IsBackground = true, Name = "PartsTray window commands" };
         hookThread = new Thread(HookLoop) { IsBackground = true, Name = "PartsTray mouse hook", Priority = ThreadPriority.Highest };
-        actionThread.Start(); decisionThread.Start(); commandThread.Start(); hookThread.Start(); hookReady.Wait();
+        windowShown = WindowShown;
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += WheelDisplayChanged;
+        WatchWheelWindows(settings.Wheel);
+        decisionThread.Start(); firstWindowScan.Wait();
+        actionThread.Start(); commandThread.Start(); hookThread.Start(); hookReady.Wait();
         raw = new RawInputWindow(() => Volatile.Write(ref lastRaw, Environment.TickCount64), log);
         monitor.Tick += (_, _) => { CheckKazaguru(); hidden.Prune(); }; monitor.Start();
     }
@@ -74,7 +80,13 @@ internal sealed partial class GestureModule : IFeatureModule, IGestureEffects
         { decisions.Enqueue(e); decisionWake.Set(); }
         else if (e.Kind is GestureEffectKind.Command or GestureEffectKind.MoveWindow or GestureEffectKind.SwitchMaximized)
         { commands.Enqueue((e, Volatile.Read(ref epoch))); commandWake.Set(); }
-        else { actions.Enqueue(e); actionWake.Set(); }
+        else
+        {
+            // 投函時の wParam には、このホイールを受けた時点のボタン状態を使う。
+            uint keys = e.Kind == GestureEffectKind.FastScroll && e.Target.Window != 0 ? WheelKeys(e.Input) : 0;
+            actions.Enqueue((e, keys));
+            actionWake.Set();
+        }
     }
     private void Reply(Action action)
     {
@@ -162,8 +174,8 @@ internal sealed partial class GestureModule : IFeatureModule, IGestureEffects
                     0x205 => new(MouseEventKind.Up, point, PointerButton.Right),
                     0x207 => new(MouseEventKind.Down, point, PointerButton.Middle, Modifiers: mods),
                     0x208 => new(MouseEventKind.Up, point, PointerButton.Middle),
-                    0x20A => new(MouseEventKind.Wheel, point, Delta: unchecked((short)(native.Data >> 16))),
-                    0x20E => new(MouseEventKind.HorizontalWheel, point, Delta: unchecked((short)(native.Data >> 16))),
+                    0x20A => new(MouseEventKind.Wheel, point, Delta: unchecked((short)(native.Data >> 16)), Modifiers: mods),
+                    0x20E => new(MouseEventKind.HorizontalWheel, point, Delta: unchecked((short)(native.Data >> 16)), Modifiers: mods),
                     _ => null
                 };
                 if (e.HasValue)
@@ -226,16 +238,26 @@ internal sealed partial class GestureModule : IFeatureModule, IGestureEffects
         yield return pause;
         var restore = new ToolStripMenuItem("隠したウィンドウをすべて戻す"); restore.Click += (_, _) => hidden.RestoreAll(); yield return restore;
     }
+    private void WheelDisplayChanged(object? sender, EventArgs args)
+    {
+        var wheel = Volatile.Read(ref settings).Wheel;
+        if (wheel.FastScrollOnScrollBar && wheel.EdgeAssist) Interlocked.Exchange(ref rebuildRenderers, 1);
+        if (wheel.FastScrollOnScrollBar || wheel.EdgeRedirect) RequestWindowScan();
+    }
     public void SettingsChanged(AppSettings value)
     {
         wheelTrace.SetEnabled(value.Diagnostics.WheelTrace);
+        Volatile.Write(ref settings, value);
+        WatchWheelWindows(value.Wheel);
         Interlocked.Increment(ref epoch);
-        Volatile.Write(ref settings, value); overlay.SettingsChanged(value.Gesture.Trail);
+        overlay.SettingsChanged(value.Gesture.Trail);
         Reply(() => { engine.UpdateSettings(value); engine.SetPaused(!Enabled); });
     }
     public void Dispose()
     {
         if (Interlocked.Exchange(ref stopping, 1) != 0) return;
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= WheelDisplayChanged;
+        StopWatchingWheelWindows();
         monitor.Stop(); monitor.Dispose(); raw.Dispose();
         windowSwitcher.Dispose();
         Reply(() => { engine.Shutdown(); Post(new(GestureEffectKind.Flush)); });

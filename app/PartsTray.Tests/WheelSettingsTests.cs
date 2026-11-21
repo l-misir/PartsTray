@@ -1,3 +1,4 @@
+// ホイール設定の既定値、JSON の読み書き、値の検証を確認します。
 using System.Text.Json;
 using PartsTray.Core;
 using Xunit;
@@ -6,6 +7,61 @@ namespace PartsTray.Tests;
 
 public sealed class WheelSettingsTests
 {
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("""{"wheel":{"fastScrollOnScrollBar":true}}""")]
+    public void MissingFastScrollExclusionsDefaultToAcrobatAndReader(string json)
+    {
+        var settings = JsonSerializer.Deserialize<AppSettings>(json, AppSettings.JsonOptions)!;
+        settings.Validate();
+        Assert.Equal(new[] { "Acrobat.exe", "AcroRd32.exe" }, settings.Wheel.FastScrollExcludedProcesses);
+    }
+
+    [Theory]
+    [InlineData("""[]""")]
+    [InlineData("""["Code.exe","Other.exe"]""")]
+    public void FastScrollExclusionsReplaceDefaultsAndRoundTrip(string names)
+    {
+        var settings = LoadFastScrollExclusions(names);
+        settings.Validate();
+        var expected = JsonSerializer.Deserialize<string[]>(names)!;
+        Assert.Equal(expected, settings.Wheel.FastScrollExcludedProcesses);
+        using var saved = JsonDocument.Parse(JsonSerializer.Serialize(settings, AppSettings.JsonOptions));
+        Assert.Equal(expected, saved.RootElement.GetProperty("wheel").GetProperty("fastScrollExcludedProcesses").Deserialize<string[]>());
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("""[""]""")]
+    [InlineData("""["folder/app.exe"]""")]
+    public void InvalidFastScrollExclusionsAreRejected(string names)
+    {
+        var settings = LoadFastScrollExclusions(names);
+        Assert.Throws<InvalidDataException>(settings.Validate);
+    }
+
+    private static AppSettings LoadFastScrollExclusions(string names) =>
+        JsonSerializer.Deserialize<AppSettings>("{\"wheel\":{\"fastScrollExcludedProcesses\":" + names + "}}", AppSettings.JsonOptions)!;
+
+    [Theory]
+    [InlineData("{}", true, false)]
+    [InlineData("""{"wheel":{"fastScrollOnScrollBar":true}}""", true, false)]
+    [InlineData("""{"wheel":{"edgeAssist":false}}""", false, false)]
+    [InlineData("""{"wheel":{"edgeRedirect":true}}""", true, true)]
+    [InlineData("""{"wheel":{"edgeAssist":false,"edgeRedirect":true}}""", false, true)]
+    public void EdgeOptionsLoadAndSaveIndependently(string json, bool edgeAssist, bool edgeRedirect)
+    {
+        var settings = JsonSerializer.Deserialize<AppSettings>(json, AppSettings.JsonOptions)!;
+        settings.Validate();
+        Assert.Equal(edgeAssist, settings.Wheel.EdgeAssist);
+        Assert.Equal(edgeRedirect, settings.Wheel.EdgeRedirect);
+
+        using var saved = JsonDocument.Parse(JsonSerializer.Serialize(settings, AppSettings.JsonOptions));
+        var wheel = saved.RootElement.GetProperty("wheel");
+        Assert.Equal(edgeAssist, wheel.GetProperty("edgeAssist").GetBoolean());
+        Assert.Equal(edgeRedirect, wheel.GetProperty("edgeRedirect").GetBoolean());
+    }
+
     [Fact]
     public void DefaultsAndJsonRoundTrip()
     {
@@ -53,5 +109,21 @@ public sealed class WheelSettingsTests
         var settings = JsonSerializer.Deserialize<AppSettings>("{\"diagnostics\":{\"wheelTrace\":true}}", AppSettings.JsonOptions)!;
         settings.Validate(); Assert.True(settings.Diagnostics.WheelTrace);
         Assert.Equal("diagnostics が必要です", Assert.Throws<InvalidDataException>(() => (settings with { Diagnostics = null! }).Validate()).Message);
+    }
+
+    [Theory]
+    [InlineData("{}", false, false)]
+    [InlineData("""{"diagnostics":{"wheelTrace":true}}""", false, true)]
+    [InlineData("""{"diagnostics":{"scrollProbe":true}}""", true, false)]
+    public void ScrollProbeSettingSurvivesWheelEdits(string json, bool probe, bool trace)
+    {
+        var loaded = JsonSerializer.Deserialize<AppSettings>(json, AppSettings.JsonOptions)!;
+        Assert.Equal(probe, loaded.Diagnostics.ScrollProbe);
+        var edited = loaded with { Wheel = loaded.Wheel with { FastScrollOnScrollBar = true } };
+        var merged = SettingsText.MergeEditable(loaded, edited);
+        using var saved = JsonDocument.Parse(JsonSerializer.Serialize(merged, AppSettings.JsonOptions));
+        var diagnostics = saved.RootElement.GetProperty("diagnostics");
+        Assert.Equal(probe, diagnostics.GetProperty("scrollProbe").GetBoolean());
+        Assert.Equal(trace, diagnostics.GetProperty("wheelTrace").GetBoolean());
     }
 }

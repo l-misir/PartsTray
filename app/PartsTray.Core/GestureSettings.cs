@@ -30,14 +30,16 @@ public sealed record GestureSettings
                 pattern.Zip(pattern.Skip(1)).Any(p => p.First == p.Second) ||
                 command is not ("Back" or "Forward" or "Refresh" or "Close" or "Minimize"))
                 throw new InvalidDataException("未対応のジェスチャーです");
-        if (g.BrowserProcesses.Concat(g.ExcludedProcesses).Any(p => string.IsNullOrWhiteSpace(p) || p.IndexOfAny(['/', '\\', ':']) >= 0))
-            throw new InvalidDataException("プロセス名だけを指定してください");
         var t = settings.TitleBar;
         if (t == null || t.ShiftClick is not ("ToggleTopMost" or "None") || t.CtrlClick is not ("OpenExecutableFolder" or "None") ||
             t.MiddleClick is not ("CloseWindow" or "None") || t.MinimizeButtonRightClick is not ("MinimizeToTray" or "None"))
             throw new InvalidDataException("titleBar 設定が不正です");
-        if (settings.Wheel == null || settings.Wheel.FastScrollMultiplier is < 1 or > 100)
+        var wheel = settings.Wheel;
+        if (wheel == null || wheel.FastScrollMultiplier is < 1 or > 100 || wheel.FastScrollExcludedProcesses == null)
             throw new InvalidDataException("wheel 設定が不正です");
+        if (g.BrowserProcesses.Concat(g.ExcludedProcesses).Concat(wheel.FastScrollExcludedProcesses)
+            .Any(p => string.IsNullOrWhiteSpace(p) || p.IndexOfAny(['/', '\\', ':']) >= 0))
+            throw new InvalidDataException("プロセス名だけを指定してください");
     }
     private static bool Color(string? s) => s is { Length: 7 } && s[0] == '#' && s.Skip(1).All(Uri.IsHexDigit);
 }
@@ -61,5 +63,10 @@ public sealed record WheelSettings
     // 11/20：配った人の PC で、知らないうちにウィンドウの動きが変わらないよう、かざぐるマウス由来の操作は最初は切る（設定画面でオンにできる）。
     public bool FastScrollOnScrollBar { get; init; } = false;
     public int FastScrollMultiplier { get; init; } = 5;
+    public string[] FastScrollExcludedProcesses { get; init; } = ["Acrobat.exe", "AcroRd32.exe"];
+    public bool AllowsFastScroll(string? processName) => FastScrollExcludedProcesses.Length == 0 ||
+        !string.IsNullOrEmpty(processName) && !FastScrollExcludedProcesses.Contains(processName, StringComparer.OrdinalIgnoreCase);
+    public bool EdgeAssist { get; init; } = true;
+    public bool EdgeRedirect { get; init; } = false;
     public bool FocusUnderCursor { get; init; } = false;
 }

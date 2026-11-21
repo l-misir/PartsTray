@@ -1,3 +1,4 @@
+// モニター設定の既定値、JSON の保存・読込、設定画面からの保存を検証します。
 using System.Text.Json;
 using PartsTray.Core;
 using Xunit;
@@ -13,6 +14,8 @@ public sealed class MonitorSettingsTests
         settings.Validate();
         var monitor = settings.Monitor;
         Assert.True(monitor.Enabled); Assert.Equal(200, monitor.SampleIntervalMs);
+        Assert.Equal("uniform", monitor.HundredStyle);
+        Assert.Equal("Tahoma", monitor.DigitFont);
         // 指示書L：CPU を独立アイコンへ移したので、オウムの既定は数字なしに変更。
         Assert.True(monitor.Parrot.Enabled); Assert.True(monitor.Parrot.Rainbow); Assert.Equal("none", monitor.Parrot.CpuText);
         Assert.True(monitor.Cpu.Enabled); Assert.Equal("#64D2FF", monitor.Cpu.Color);
@@ -34,8 +37,95 @@ public sealed class MonitorSettingsTests
         Assert.True(settings.Monitor.Cpu.Enabled);
         Assert.Equal("#64D2FF", settings.Monitor.Cpu.Color);
         Assert.True(settings.Monitor.TempMemory.Split);
+        Assert.Equal("uniform", settings.Monitor.HundredStyle);
+        Assert.Equal("Tahoma", settings.Monitor.DigitFont);
+        Assert.True(settings.Monitor.PlainZero);
+        Assert.Equal("", settings.Monitor.CpuDigitFont);
+        Assert.Equal("", settings.Monitor.TemperatureDigitFont);
+        Assert.Equal("", settings.Monitor.MemoryDigitFont);
         // 明示した従来の設定は保持し、省略時だけ新しい既定にする。
         Assert.Equal(json.Contains("bottom") ? "bottom" : "none", settings.Monitor.Parrot.CpuText);
+    }
+
+    [Theory]
+    [InlineData("shrink")]
+    [InlineData("narrow")]
+    [InlineData("narrowOne")]
+    [InlineData("uniform")]
+    public void HiddenHundredStyleSurvivesSettingsWindowAndJson(string style)
+    {
+        var original = JsonSerializer.Deserialize<AppSettings>(
+            $$$"""{"monitor":{"hundredStyle":"{{{style}}}"}}""", AppSettings.JsonOptions)!;
+        original.Validate();
+        var edited = new AppSettings { Monitor = new() { TaskbarTheme = "light" } };
+        var saved = SettingsText.MergeEditable(original, edited);
+        Assert.Equal("light", saved.Monitor.TaskbarTheme);
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(saved, AppSettings.JsonOptions));
+        Assert.Equal(style, json.RootElement.GetProperty("monitor").GetProperty("hundredStyle").GetString());
+    }
+
+    [Theory]
+    [InlineData("Terminus")]
+    [InlineData("TerminusBold")]
+    [InlineData("Verdana")]
+    [InlineData("Segoe UI Semibold")]
+    [InlineData("Tahoma, Regular, Pixel")]
+    [InlineData("Tahoma, Regular, Pixel, Square2")]
+    [InlineData("PartsTray Missing Test Font")]
+    [InlineData("Dots:CoreTemp")]
+    [InlineData("Dots:Claude")]
+    [InlineData("Dots:SevenSeg")]
+    [InlineData("Dots:File")]
+    public void HiddenDigitFontSurvivesSettingsWindowAndJson(string font)
+    {
+        var original = JsonSerializer.Deserialize<AppSettings>(
+            $$$"""{"monitor":{"digitFont":"{{{font}}}"}}""", AppSettings.JsonOptions)!;
+        original.Validate();
+        Assert.Equal(font, original.Monitor.DigitFont);
+        var edited = new AppSettings { Monitor = new() { TaskbarTheme = "light" } };
+        var saved = SettingsText.MergeEditable(original, edited);
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(saved, AppSettings.JsonOptions));
+        Assert.Equal(font, json.RootElement.GetProperty("monitor").GetProperty("digitFont").GetString());
+        Assert.Equal("light", saved.Monitor.TaskbarTheme);
+    }
+
+    [Theory]
+    [InlineData("Bahnschrift SemiBold", "Terminus", "TerminusBold", "Bahnschrift SemiBold", "Terminus", "TerminusBold")]
+    [InlineData("", "Terminus", "", "Verdana", "Terminus", "Verdana")]
+    [InlineData("Tahoma", "", "TerminusBold", "Tahoma", "Verdana", "TerminusBold")]
+    public void IconFontsOverrideOrInheritTheSharedFont(string cpu, string temperature, string memory,
+        string expectedCpu, string expectedTemperature, string expectedMemory)
+    {
+        var monitor = new MonitorSettings
+        {
+            DigitFont = "Verdana", CpuDigitFont = cpu, TemperatureDigitFont = temperature, MemoryDigitFont = memory
+        };
+        Assert.Equal(expectedCpu, monitor.ResolveDigitFont(monitor.CpuDigitFont));
+        Assert.Equal(expectedTemperature, monitor.ResolveDigitFont(monitor.TemperatureDigitFont));
+        Assert.Equal(expectedMemory, monitor.ResolveDigitFont(monitor.MemoryDigitFont));
+    }
+
+    [Theory]
+    [InlineData("Bahnschrift SemiBold", "Terminus", "TerminusBold")]
+    [InlineData("Tahoma, Regular, Pixel", "Tahoma, Bold, Smooth", "Terminus, Bold")]
+    [InlineData("Dots:Claude", "Dots:CoreTemp", "Dots:SevenSeg")]
+    [InlineData("Dots:File", "", "Dots:Claude")]
+    public void IconFontNamesSurviveSettingsWindowAndJson(string cpu, string temperature, string memory)
+    {
+        var original = JsonSerializer.Deserialize<AppSettings>($$$"""
+            {"monitor":{"digitFont":"Tahoma","cpuDigitFont":"{{{cpu}}}","temperatureDigitFont":"{{{temperature}}}",
+              "memoryDigitFont":"{{{memory}}}","plainZero":false}}
+            """, AppSettings.JsonOptions)!;
+        original.Validate();
+        var edited = new AppSettings { Monitor = new() { TaskbarTheme = "light" } };
+        var saved = SettingsText.MergeEditable(original, edited);
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(saved, AppSettings.JsonOptions));
+        var monitor = json.RootElement.GetProperty("monitor");
+        Assert.Equal("light", monitor.GetProperty("taskbarTheme").GetString());
+        Assert.Equal(cpu, monitor.GetProperty("cpuDigitFont").GetString());
+        Assert.Equal(temperature, monitor.GetProperty("temperatureDigitFont").GetString());
+        Assert.Equal(memory, monitor.GetProperty("memoryDigitFont").GetString());
+        Assert.False(monitor.GetProperty("plainZero").GetBoolean());
     }
 
     [Theory]
@@ -134,6 +224,8 @@ public sealed class MonitorSettingsTests
     [InlineData("{\"monitor\":{\"parrot\":{\"cpuTextColor\":\"white\"}}}", "cpuTextColor")]
     [InlineData("{\"monitor\":{\"tempMemory\":{\"tempColor\":\"#F00\"}}}", "tempColor")]
     [InlineData("{\"monitor\":{\"digitStyle\":\"coretemp\"}}", "digitStyle")]
+    [InlineData("{\"monitor\":{\"hundredStyle\":\"NarrowOne\"}}", "hundredStyle")]
+    [InlineData("{\"monitor\":{\"hundredStyle\":null}}", "hundredStyle")]
     [InlineData("{\"monitor\":{\"tempMemory\":{\"source\":\"ACPI\"}}}", "source")]
     [InlineData("{\"monitor\":{\"tempMemory\":{\"source\":\"wmi\"}}}", "source")]
     [InlineData("{\"monitor\":{\"tempMemory\":{\"memoryColor\":null}}}", "memoryColor")]

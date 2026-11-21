@@ -1,3 +1,5 @@
+// 肩代わりの適用・入力・引き継ぎを検証します。
+// 対応する機能や入力条件を変えるときに開きます。
 using PartsTray.Core;
 using Xunit;
 
@@ -11,7 +13,7 @@ public sealed class SessionTests
         Assert.Equal(SessionState.Active, h.Session.State);
         Assert.Equal(7, h.Writes.Length);
         Assert.Equal(new byte[] { 0, 8, 0x98 }, h.Writes[0][4..7]);
-        Assert.Equal(GapSession.ButtonOrder, h.Writes.Skip(1).Take(5).Select(r => HidReport.U16(r.AsSpan(4, 2))));
+        Assert.Equal(new ushort[] { 0x52, 0x56, 0x53, 0xC3, 0x1A0 }, h.Writes.Skip(1).Take(5).Select(r => HidReport.U16(r.AsSpan(4, 2))));
         Assert.All(h.Writes.Skip(1).Take(5), r => Assert.Equal(3, r[6]));
         Assert.Equal(new byte[] { 1, 1 }, h.Writes[6][4..6]);
         Assert.Equal(0x15, h.Sent[^1][3]);

@@ -8,6 +8,34 @@ namespace PartsTray;
 
 internal sealed partial class MonitorModule
 {
+    private int? DisplayCpu => digitPreview.Display(MonitorMath.Round(cpu));
+    private int? DisplayTemperature => digitPreview.Display(temperature is { } t ? MonitorMath.Round(t.Average) : null);
+    private int? DisplayMemory => digitPreview.Display((int?)memoryLoad);
+
+    private void DrawMonitor()
+    {
+        UpdateTooltip(); // 初めて表示する前に、新しいアイコンの説明文も設定する。
+        if (TempEnabled) DrawTempMemory();
+        if (CpuEnabled)
+        {
+            DrawBig(cpuSlot, DisplayCpu, ParseColor(settings.Cpu.Color, Palette.Cyan, settings.Cpu.BackgroundColor),
+                settings.Cpu.BackgroundColor, settings.ResolveDigitFont(settings.CpuDigitFont));
+            order.Want(cpuIcon, true);
+        }
+        if (MemoryEnabled)
+        {
+            DrawBig(memorySlot, DisplayMemory,
+                ParseColor(settings.TempMemory.MemoryColor, Color.White, settings.TempMemory.MemoryBackgroundColor),
+                settings.TempMemory.MemoryBackgroundColor, settings.ResolveDigitFont(settings.MemoryDigitFont));
+            order.Want(memoryIcon, true);
+        }
+        if (ParrotEnabled)
+        {
+            DrawParrot();
+            order.Want(parrot, true);
+        }
+    }
+
     private static Bitmap Canvas(int size) => new(size, size, PixelFormat.Format32bppArgb);
     private Color ParseColor(string text, Color fallback, string background = "")
     {
@@ -30,43 +58,44 @@ internal sealed partial class MonitorModule
         if (TrayInteraction.Busy) return;   // 通知領域で並べ替え中は描き替えない
         if (settings.TempMemory.Split)
         {
-            DrawBig(mainSlot, temperature is { } reading ? MonitorMath.Round(reading.Average) : null, ParseColor(settings.TempMemory.TempColor, Color.Red, settings.TempMemory.TempBackgroundColor), settings.TempMemory.TempBackgroundColor);
+            DrawBig(mainSlot, DisplayTemperature, ParseColor(settings.TempMemory.TempColor, Color.Red, settings.TempMemory.TempBackgroundColor),
+                settings.TempMemory.TempBackgroundColor, settings.ResolveDigitFont(settings.TemperatureDigitFont), maximumValue: 150);
             return;
         }
-        int size = IconSize(), wide = MonitorFont.TempMemoryHeight(size), height = DigitArt.Height(size, settings.DigitStyle, wide), row = (size - 1) / 2;
+        int size = IconSize();
         using var bitmap = Canvas(size);
         FillBackground(bitmap, settings.TempMemory.TempBackgroundColor, 0, size / 2);
         FillBackground(bitmap, settings.TempMemory.MemoryBackgroundColor, size / 2, size - size / 2);
-        string tempText = temperature is { } t ? DigitArt.Fit(MonitorMath.Round(t.Average), size, settings.DigitStyle, wide) : "--";
-        DrawText(bitmap, tempText, height, (row - height) / 2, ParseColor(settings.TempMemory.TempColor, Color.Red, settings.TempMemory.TempBackgroundColor));
-        string memoryText = memoryLoad is { } load ? DigitArt.Fit((int)load, size, settings.DigitStyle, wide) : "--";
-        DrawText(bitmap, memoryText, height, size - row + (row - height) / 2, ParseColor(settings.TempMemory.MemoryColor, Color.White, settings.TempMemory.MemoryBackgroundColor));
+        var (temp, memory) = DigitArt.TempMemoryInk(settings, DisplayTemperature, DisplayMemory, size, fileDigits, digitPreview: digitPreview.Enabled);
+        DigitArt.DrawMask(bitmap, temp, DigitArt.RowTop(size, temp.GetLength(0), false, settings.ResolveDigitFont(settings.TemperatureDigitFont)),
+            ParseColor(settings.TempMemory.TempColor, Color.Red, settings.TempMemory.TempBackgroundColor));
+        DigitArt.DrawMask(bitmap, memory, DigitArt.RowTop(size, memory.GetLength(0), true, settings.ResolveDigitFont(settings.MemoryDigitFont)),
+            ParseColor(settings.TempMemory.MemoryColor, Color.White, settings.TempMemory.MemoryBackgroundColor));
         mainSlot.Replace(bitmap);
     }
 
-    private void DrawBig(TrayIconSlot<BigDrawingKey> slot, int? value, Color color, string background)
+    private void DrawBig(TrayIconSlot<BigDrawingKey> slot, int? value, Color color, string background,
+        string digitFont, int maximumValue = 100)
     {
         if (TrayInteraction.Busy) return;
         int size = IconSize();
-        var key = new BigDrawingKey(value, size, settings.DigitStyle, color.ToArgb(), background);
+        var source = DigitFontSpec.DotSet(digitFont) == DotDigitKind.File ? fileDigits : null;
+        var key = new BigDrawingKey(value, size, settings.DigitStyle, settings.HundredStyle, digitFont,
+            settings.PlainZero, digitPreview.Enabled, color.ToArgb(), background, source);
         if (slot.Key == key) return;
-        var mask = DigitArt.Big(value, size, settings.DigitStyle);
+        var mask = DigitArt.BigInk(value, size, settings.DigitStyle, settings.HundredStyle, maximumValue, digitFont,
+            settings.PlainZero, source, digitPreview: digitPreview.Enabled);
         // 例: 幅不足で 100 も 99 と描く場合、実値だけが変わっても差し替えない。
         if (slot.Key is { } previous && previous with { Value = value } == key && slot.BigMask is { } old &&
             old.GetLength(0) == mask.GetLength(0) && old.GetLength(1) == mask.GetLength(1) &&
-            (ReferenceEquals(old, mask) || old.Cast<bool>().SequenceEqual(mask.Cast<bool>())))
+            (ReferenceEquals(old, mask) || old.Cast<byte>().SequenceEqual(mask.Cast<byte>())))
         {
             slot.Key = key;
             return;
         }
         using var bitmap = Canvas(size);
         FillBackground(bitmap, background, 0, size);
-        int left = (size - mask.GetLength(1)) / 2, top = (size - mask.GetLength(0)) / 2;
-        // 万一アイコンより大きい文字が来ても落ちないよう、はみ出した点は描かない（起動時に例外が出るとアプリごと止まる）。
-        for (int y = 0; y < mask.GetLength(0); y++)
-            for (int x = 0; x < mask.GetLength(1); x++)
-                if (mask[y, x] && left + x >= 0 && left + x < size && top + y >= 0 && top + y < size)
-                    bitmap.SetPixel(left + x, top + y, color);
+        DigitArt.DrawMask(bitmap, mask, (size - mask.GetLength(0)) / 2, color);
         if (TrayInteraction.Busy) return;
         slot.Replace(bitmap);
         slot.Key = key; slot.BigMask = mask;
@@ -77,7 +106,12 @@ internal sealed partial class MonitorModule
         if (!ParrotEnabled || TrayInteraction.Busy) return;   // 通知領域で並べ替え中は描き替えない
         ReadTheme();
         int size = IconSize();
-        int textHeight = settings.Parrot.CpuText == "none" ? 0 : DigitArt.Height(size, settings.DigitStyle, MonitorFont.ParrotHeight(size));
+        int? overlay = settings.Parrot.CpuText == "none" ? null : DisplayCpu;
+        var cpuMask = overlay.HasValue ?
+            DigitArt.RowInk(overlay, size, settings.DigitStyle, MonitorFont.ParrotHeight(size), settings.HundredStyle,
+                digitFont: settings.ResolveDigitFont(settings.CpuDigitFont), plainZero: settings.PlainZero,
+                fileDigits: fileDigits, digitPreview: digitPreview.Enabled) : null;
+        int textHeight = cpuMask?.GetLength(0) ?? 0;
         // 絵と数字の間に 1 ドット空ける。
         int imageHeight = textHeight == 0 ? size : size - textHeight - 1;
         int imageTop = settings.Parrot.CpuText == "top" ? textHeight + 1 : 0;
@@ -107,11 +141,13 @@ internal sealed partial class MonitorModule
                 graphics.DrawImage(source, target, 0, 0, source.Width, source.Height, GraphicsUnit.Pixel, attributes);
             }
         }
-        if (textHeight != 0)
-            DrawText(bitmap, DigitArt.Fit(MonitorMath.Round(cpu), size, settings.DigitStyle, MonitorFont.ParrotHeight(size)), textHeight,
+        if (cpuMask != null)
+        {
+            DigitArt.DrawMask(bitmap, cpuMask,
                 settings.Parrot.CpuText == "top" ? 0 : size - textHeight, ParseColor(settings.Parrot.CpuTextColor, Color.White));
+        }
         parrotSlot.Replace(bitmap);
-        SetTooltip(parrot, $"CPU {MonitorMath.Round(cpu)}%");
+        SetTooltip(parrot, $"CPU {overlay ?? MonitorMath.Round(cpu)}%", showsDigits: overlay.HasValue);
     }
 
     // アイコンの大きさに合わせて縮めたコマ。大きさが変わったときだけ作り直す（毎コマ縮めると重いため）。
@@ -124,15 +160,4 @@ internal sealed partial class MonitorModule
         scaledKey = (size, imageHeight, stretch, widen);
         return scaledFrames = ParrotFrames.Scale(frames, size, imageHeight, stretch, widen);
     }
-
-    // 数字は点の文字のまま、横にだけ伸ばして幅いっぱいに描く（11/19 ユーザーの要望）。
-    private void DrawText(Bitmap bitmap, string text, int height, int top, Color color)
-    {
-        var glyphs = DigitArt.Mask(text, bitmap.Width, settings.DigitStyle, height);
-        int left = (bitmap.Width - glyphs.GetLength(1)) / 2;
-        for (int y = 0; y < height; y++)
-            for (int x = 0; x < glyphs.GetLength(1); x++)
-                if (glyphs[y, x]) bitmap.SetPixel(left + x, top + y, color);
-    }
-
 }

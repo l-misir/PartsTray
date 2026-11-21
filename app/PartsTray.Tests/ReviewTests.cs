@@ -1,3 +1,5 @@
+// 引き継ぎ・再接続・後片付けが他の設定を上書きしないことを検証します。
+// 所有権や後片付けの条件を変えるときに開きます。
 using PartsTray.Core;
 using Xunit;
 
@@ -130,20 +132,25 @@ public sealed class ReviewTests
     }
 
     [Theory]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    [InlineData(false, false)]
-    public void CleanupHonorsLatestOptionsOffIntent(bool previouslyOn, bool deviceStillOn)
+    [InlineData(false, true, 0x53)]
+    [InlineData(true, true, 0x53)]
+    [InlineData(false, false, 0x53)]
+    [InlineData(false, true, 0xC4)]
+    [InlineData(true, true, 0xC4)]
+    [InlineData(false, false, 0xC4)]
+    public void CleanupHonorsLatestOptionsOffIntent(bool previouslyOn, bool deviceStillOn, byte cid)
     {
-        var h = new Harness(); h.Activate(); h.Options();
-        foreach (ushort c in GapSession.ButtonOrder.Where(c => c != 0x53)) h.Options(13, 3, (byte)(c >> 8), (byte)c, 0x23);
+        var gap = new GapSettings { Enabled = true };
+        if (cid == 0xC4) gap = SettingsText.SetButton(gap, "0x00C4", "Hold");
+        var h = new Harness(new() { GapFiller = gap }); h.Activate(); h.Options();
+        foreach (ushort c in GapSession.ButtonOrder.Where(c => c != cid)) h.Options(13, 3, (byte)(c >> 8), (byte)c, 0x23);
         h.Options(19, 2);
-        if (previouslyOn) h.Options(13, 3, 0, 0x53, 0x23);
-        h.Options(13, 3, 0, 0x53, 0x22);
-        h.Cids[0x53] = deviceStillOn ? (byte)1 : (byte)0;
+        if (previouslyOn) h.Options(13, 3, 0, cid, 0x23);
+        h.Options(13, 3, 0, cid, 0x22);
+        h.Cids[cid] = deviceStillOn ? (byte)1 : (byte)0;
         h.Sent.Clear(); h.Advance(15);
-        Assert.Contains(h.Sent, r => r[2] == 13 && r[3] == 0x25 && r[5] == 0x53);
-        if (deviceStillOn) Assert.Equal(new byte[] { 0, 0x53, 2, 0, 0x53 }, Assert.Single(h.Writes)[4..9]);
+        Assert.Contains(h.Sent, r => r[2] == 13 && r[3] == 0x25 && r[5] == cid);
+        if (deviceStillOn) Assert.Equal(new byte[] { 0, cid, 2, 0, cid }, Assert.Single(h.Writes)[4..9]);
         else Assert.Empty(h.Writes);
     }
 

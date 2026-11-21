@@ -13,6 +13,9 @@
   <ItemGroup><ProjectReference Include="../PartsTray.Core/PartsTray.Core.csproj" /></ItemGroup>
   <ItemGroup><EmbeddedResource Include="PartsTray.ico" LogicalName="PartsTray.ico" /></ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Fonts\TerminusTTF-4.49.3.ttf" LogicalName="PartsTray.Fonts.TerminusTTF-4.49.3.ttf" />
+    <EmbeddedResource Include="Fonts\TerminusTTF-Bold-4.49.3.ttf" LogicalName="PartsTray.Fonts.TerminusTTF-Bold-4.49.3.ttf" />
+    <None Update="Fonts\Terminus-LICENSE.txt" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Remove="Assets\**" />
     <None Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

@@ -15,6 +15,8 @@ internal sealed partial class MonitorModule : IFeatureModule
     private readonly TrayIconSlot<BigDrawingKey> mainSlot, parrotSlot, cpuSlot, memorySlot;
     private readonly System.Windows.Forms.Timer sampleTimer = new();
     private readonly System.Windows.Forms.Timer frameTimer = new();
+    private readonly System.Windows.Forms.Timer previewTimer = new() { Interval = 2000 };
+    private readonly DigitPreview digitPreview = new();
     private readonly Stopwatch elapsed = Stopwatch.StartNew();
     private Bitmap[] frames;
     private bool coloredFrames;        // partyparrot.gif のコマ（もともと虹色）。塗り替えない
@@ -26,6 +28,7 @@ internal sealed partial class MonitorModule : IFeatureModule
     private Bitmap[]? scaledFrames;              // アイコンの大きさに縮めたコマ（大きさが変わるまで使い回す）
     private (int Size, int Height, bool Stretch, int Widen) scaledKey;
     private MonitorSettings settings = new();
+    private string[][][]? fileDigits;
     private string statusText = "PartsTray";
     private CpuTimes? previousCpu;
     private double cpu;
@@ -73,6 +76,12 @@ internal sealed partial class MonitorModule : IFeatureModule
         framesTheme = theme.IsLight; theme.Changed += ThemeChanged;
         sampleTimer.Tick += (_, _) => Sample();
         frameTimer.Tick += (_, _) => { frame = (frame + 1) % frames.Length; DrawParrot(); };
+        previewTimer.Tick += (_, _) =>
+        {
+            if (settingsPending || TrayInteraction.Busy) return;
+            digitPreview.Advance();
+            DrawMonitor();
+        };
         SettingsChanged(settings);
     }
 
@@ -94,6 +103,10 @@ internal sealed partial class MonitorModule : IFeatureModule
             settings.Enabled != value.Monitor.Enabled || settings.TempMemory.Enabled != value.Monitor.TempMemory.Enabled)
             temperatureHealth.Reset();
         settings = value.Monitor;
+        if (digitPreview.SetValues(value.Diagnostics.DigitPreview)) previewTimer.Stop();
+        string[] iconFonts = [settings.CpuDigitFont, settings.TemperatureDigitFont, settings.MemoryDigitFont];
+        fileDigits = iconFonts.Any(name => DigitFontSpec.DotSet(settings.ResolveDigitFont(name)) == DotDigitKind.File)
+            ? DotDigitFile.Load(Path.Combine(AppContext.BaseDirectory, "digits.png"), log.Write) : null;
         acpiReadAt = elapsed.ElapsedMilliseconds - 1000;   // 読み方が変わってもすぐ読む
         sampleTimer.Interval = settings.SampleIntervalMs;
         settingsPending = true;
@@ -113,6 +126,7 @@ internal sealed partial class MonitorModule : IFeatureModule
             if (!CpuEnabled) { order.Want(cpuIcon, false); cpuSlot.Reset(null); }
             if (!MemoryEnabled) { order.Want(memoryIcon, false); memorySlot.Reset(null); }
             if (ParrotEnabled) frameTimer.Start();
+            previewTimer.Enabled = digitPreview.Enabled && (TempEnabled || CpuEnabled || (ParrotEnabled && settings.Parrot.CpuText != "none"));
         }
         if (!TempEnabled && !ParrotEnabled && !CpuEnabled)
         {
@@ -146,24 +160,8 @@ internal sealed partial class MonitorModule : IFeatureModule
             log.Write(AcpiTemperatureHealth.UnavailableMessage);
             mainIcon.ShowBalloonTip(5000, "CPU 温度", AcpiTemperatureHealth.UnavailableMessage, ToolTipIcon.Info);
         }
-        UpdateTooltip(); // 初めて表示する前に、新しいアイコンの説明文も設定する。
-        if (TempEnabled) DrawTempMemory();
-        if (CpuEnabled)
-        {
-            DrawBig(cpuSlot, MonitorMath.Round(cpu), ParseColor(settings.Cpu.Color, Palette.Cyan, settings.Cpu.BackgroundColor), settings.Cpu.BackgroundColor);
-            order.Want(cpuIcon, true);
-        }
-        if (MemoryEnabled)
-        {
-            DrawBig(memorySlot, memoryLoad is { } load ? (int)load : null, ParseColor(settings.TempMemory.MemoryColor, Color.White, settings.TempMemory.MemoryBackgroundColor), settings.TempMemory.MemoryBackgroundColor);
-            order.Want(memoryIcon, true);
-        }
-        if (ParrotEnabled)
-        {
-            frameTimer.Interval = MonitorMath.FrameInterval(cpu);
-            DrawParrot();
-            order.Want(parrot, true);
-        }
+        if (ParrotEnabled) frameTimer.Interval = MonitorMath.FrameInterval(cpu);
+        DrawMonitor();
     }
 
     private void ThemeChanged()
@@ -197,8 +195,9 @@ internal sealed partial class MonitorModule : IFeatureModule
     {
         // ツールチップの文字を変えても通知領域が並びを作り直すので、並べ替え中は変えない。
         if (TrayInteraction.Busy) return;
-        string memoryText = memoryLoad is { } load ? $"メモリ {load}%（{usedGb:F1}/{totalGb:F1} GB）" : "メモリ 取得不可";
-        if (CpuEnabled) SetTooltip(cpuIcon, $"CPU {MonitorMath.Round(cpu)}%");
+        string memoryText = digitPreview.Enabled ? $"メモリ {DisplayMemory}%" :
+            memoryLoad is { } load ? $"メモリ {load}%（{usedGb:F1}/{totalGb:F1} GB）" : "メモリ 取得不可";
+        if (CpuEnabled) SetTooltip(cpuIcon, $"CPU {DisplayCpu}%");
         if (MemoryEnabled) SetTooltip(memoryIcon, memoryText);
         // 11/20 ユーザーの指定：温度のアイコンの説明には温度だけを出す（PartsTray の状態はマウスの電池のアイコンへ移した。
         // BatteryModule.SetStatus）。2 段表示（split = false）のときだけメモリの行も付ける。
@@ -207,17 +206,19 @@ internal sealed partial class MonitorModule : IFeatureModule
         if (TempEnabled)
         {
             bool coreTemp = settings.TempMemory.Source == "coretemp";
-            text = temperature is { } t
-                ? coreTemp ? $"CPU {MonitorMath.Round(t.Average)}℃（最高 {MonitorMath.Round(t.Maximum)}℃）" : $"CPU {MonitorMath.Round(t.Average)}℃（ACPI）"
-                : coreTemp ? "CPU 温度なし（Core Temp の共有メモリが見つからない）" : AcpiTemperatureHealth.UnavailableMessage;
+            if (digitPreview.Enabled) text = $"CPU {DisplayTemperature}℃";
+            else if (temperature is { } t)
+                text = coreTemp ? $"CPU {MonitorMath.Round(t.Average)}℃（最高 {MonitorMath.Round(t.Maximum)}℃）" : $"CPU {MonitorMath.Round(t.Average)}℃（ACPI）";
+            else text = coreTemp ? "CPU 温度なし（Core Temp の共有メモリが見つからない）" : AcpiTemperatureHealth.UnavailableMessage;
             if (!settings.TempMemory.Split) text += "・" + memoryText;
         }
-        SetTooltip(mainIcon, text);
+        SetTooltip(mainIcon, text, showsDigits: TempEnabled);
     }
 
-    private static void SetTooltip(NotifyIcon icon, string text)
+    private void SetTooltip(NotifyIcon icon, string text, bool showsDigits = true)
     {
         if (TrayInteraction.Busy) return;
+        if (showsDigits && digitPreview.Enabled) text = "（試しの表示）" + text;
         string clipped = text.Length <= 127 ? text : text[..127];
         if (icon.Text != clipped) icon.Text = clipped;
     }
@@ -227,6 +228,7 @@ internal sealed partial class MonitorModule : IFeatureModule
         if (disposed) return;
         disposed = true; theme.Changed -= ThemeChanged;
         sampleTimer.Stop(); frameTimer.Stop(); sampleTimer.Dispose(); frameTimer.Dispose();
+        previewTimer.Dispose();
         order.Want(parrot, false); order.Want(cpuIcon, false); order.Want(memoryIcon, false);
         mainSlot.Reset(AppIcon.Small); parrotSlot.Reset(null); cpuSlot.Reset(null); memorySlot.Reset(null);
         parrot.ContextMenuStrip = null; cpuIcon.ContextMenuStrip = null; memoryIcon.ContextMenuStrip = null;
@@ -238,7 +240,8 @@ internal sealed partial class MonitorModule : IFeatureModule
     }
 
     // NotifyIcon が参照を切り替えた後でのみ、所有している HICON を解放する。
-    private sealed record BigDrawingKey(int? Value, int Size, string Style, int Color, string Background);
+    private sealed record BigDrawingKey(int? Value, int Size, string Style, string HundredStyle, string DigitFont,
+        bool PlainZero, bool DigitPreview, int Color, string Background, string[][][]? FileDigits);
 
     private static class Native
     {

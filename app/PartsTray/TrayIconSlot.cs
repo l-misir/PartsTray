@@ -17,7 +17,7 @@ internal sealed class TrayIconSlot<TKey> : IDisposable where TKey : class
     }
     public TKey? Key { get; set; }
     public NotifyIcon Target => target;
-    public bool[,]? BigMask { get; set; }
+    public byte[,]? BigMask { get; set; }
     public void SetTooltip(string text) { if (target.Text != text) target.Text = text; }
     public void Show(bool show) { if (show && target.Icon is null) return; order!.Want(target, show); }
     public void Replace(Bitmap bitmap)
