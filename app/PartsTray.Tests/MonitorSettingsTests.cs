@@ -15,7 +15,7 @@ public sealed class MonitorSettingsTests
         var monitor = settings.Monitor;
         Assert.True(monitor.Enabled); Assert.Equal(200, monitor.SampleIntervalMs);
         Assert.Equal("uniform", monitor.HundredStyle);
-        Assert.Equal("Tahoma", monitor.DigitFont);
+        Assert.Equal("Dots:SevenSeg", monitor.DigitFont);
         // 指示書L：CPU を独立アイコンへ移したので、オウムの既定は数字なしに変更。
         Assert.True(monitor.Parrot.Enabled); Assert.True(monitor.Parrot.Rainbow); Assert.Equal("none", monitor.Parrot.CpuText);
         Assert.True(monitor.Cpu.Enabled); Assert.Equal("#64D2FF", monitor.Cpu.Color);
@@ -38,7 +38,7 @@ public sealed class MonitorSettingsTests
         Assert.Equal("#64D2FF", settings.Monitor.Cpu.Color);
         Assert.True(settings.Monitor.TempMemory.Split);
         Assert.Equal("uniform", settings.Monitor.HundredStyle);
-        Assert.Equal("Tahoma", settings.Monitor.DigitFont);
+        Assert.Equal("Dots:SevenSeg", settings.Monitor.DigitFont);
         Assert.True(settings.Monitor.PlainZero);
         Assert.Equal("", settings.Monitor.CpuDigitFont);
         Assert.Equal("", settings.Monitor.TemperatureDigitFont);

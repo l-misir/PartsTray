@@ -216,8 +216,11 @@ public sealed record MonitorSettings
     // "wide" = 点の文字を横に伸ばす。単独の数字はアイコン全体に収まる高さを選ぶ。
     // "thin" = DigitFont の書体で描く。Terminus / TerminusBold は同梱書体の原寸を使う。
     public string DigitStyle { get; init; } = "wide";
+    // 書体の名前を省いたとき・書体が見つからないときの代わりの書体。
     public const string DefaultDigitFont = "Tahoma";
-    public string DigitFont { get; init; } = DefaultDigitFont;
+    // 11/21 ユーザー：「初期値は 7 セグで」。設定ファイルに digitFont がないとき（新しく使い始めたとき）の値。
+    public const string DefaultDigitArt = "Dots:SevenSeg";
+    public string DigitFont { get; init; } = DefaultDigitArt;
     // 個別の指定がないアイコンは共通の DigitFont を使う。
     public string CpuDigitFont { get; init; } = "";
     public string TemperatureDigitFont { get; init; } = "";

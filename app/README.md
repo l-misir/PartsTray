@@ -571,7 +571,7 @@ Core Tempを使う場合は共有メモリを有効にし、Core Temp側のト�
   "monitor": {
     "enabled": true,
     "digitStyle": "thin",
-    "digitFont": "Tahoma",
+    "digitFont": "Dots:SevenSeg",
     "plainZero": true,
     "sampleIntervalMs": 200,
     "parrot": { "enabled": true, "cpuText": "none", "stretch": true, "widenPx": 1, "rainbow": true, "cpuTextColor": "#FFFFFF" },
@@ -586,7 +586,7 @@ Core Tempを使う場合は共有メモリを有効にし、Core Temp側のト�
 | `enabled` | falseでオウム・CPU・メモリを消し、本体は標準アプリアイコンと状態文に戻す |
 | `sampleIntervalMs` | CPU・メモリなどの取得周期。100〜5000ms、既定200ms。ACPI温度は1秒ごと |
 | `digitStyle` | `thin`＝指定したフォントで数字を描く。`wide`（既定）＝点の文字を横に伸ばす |
-| `digitFont` | 共通の点の絵（後述の `Dots:…`）または `thin` の共通フォント。個別指定の省略時・空文字列（`""`）にはこの値を使う。同梱の `Terminus`（標準）・`TerminusBold`（太字）、または Windows の書体名。既定と未導入時の代替は `Tahoma`。共通・個別とも `"Tahoma, Regular, Pixel"` のように書体名の後に太さ（`Regular`＝標準、`Bold`＝太字）と描き方（`Pixel`＝にじみなし、`Smooth`＝輪郭をなめらかにする）を指定できる。書体名だけなら従来の描き方を使い、`uniform` では通常の Windows 書体を太字で描く。末尾の `SemiBold` などで指定した書体の太さも引き継ぐ |
+| `digitFont` | 共通の点の絵（後述の `Dots:…`）または `thin` の共通フォント。個別指定の省略時・空文字列（`""`）にはこの値を使う。**既定は `Dots:SevenSeg`**（11/21 から。それより前から使っている設定ファイルは書いてある値のまま）。書体なら同梱の `Terminus`（標準）・`TerminusBold`（太字）、または Windows の書体名。書体名を省いたときと未導入時の代替は `Tahoma`。共通・個別とも `"Tahoma, Regular, Pixel"` のように書体名の後に太さ（`Regular`＝標準、`Bold`＝太字）と描き方（`Pixel`＝にじみなし、`Smooth`＝輪郭をなめらかにする）を指定できる。書体名だけなら従来の描き方を使い、`uniform` では通常の Windows 書体を太字で描く。末尾の `SemiBold` などで指定した書体の太さも引き継ぐ |
 | `cpuDigitFont` | CPU 使用率のフォント。単独アイコンとオウムに重ねる数字に適用 |
 | `temperatureDigitFont` | CPU 温度のフォント。単独アイコンと 2 段表示の上段に適用 |
 | `memoryDigitFont` | メモリ使用率のフォント。単独アイコンと 2 段表示の下段に適用 |
